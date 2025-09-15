@@ -2,7 +2,8 @@ from nicegui import ui, events
 import os
 from dotenv import load_dotenv
 
-people = ["William", "Hao", "Howard"];
+people = ["William", "Hao", "Howard"]
+people_extern = [False, False, False]
 
 class TabData:
     name: str
@@ -13,7 +14,10 @@ class TabData:
     def __init__(self, name, items):
         self.name = name
         self.items = items
-        self.rows = [{"name": name, "price": price, "taxable": taxable} for name, price, taxable in items]
+        self.rows = [
+            {"id": id, "name": name, "price": price, "taxable": taxable}
+            for id, (name, price, taxable) in enumerate(items)
+        ]
         for person in people:
             for row in self.rows:
                 row[person] = False
@@ -22,7 +26,7 @@ class TabData:
 
     def checkbox_change(self, e: events.GenericEventArguments):
         for row in self.rows:
-            if row['name'] == e.args['name']:
+            if row['id'] == e.args['id']:
                 row.update(e.args)
         self.update_costs()
         self.display_costs.refresh()
@@ -34,10 +38,13 @@ class TabData:
 
         for row in self.rows:
             num_checked = sum(row[person] for person in people)
+
             price = row["price"] * (1 + tax_rate) if row["taxable"] else row["price"]
-            price_per_person = price / (num_checked if num_checked > 0 else len(people))
-            for person in people:
-                if num_checked == 0 or row[person]:
+
+            price_per_person = price / (num_checked if num_checked > 0 else people_extern.count(False))
+
+            for person, extern in zip(people, people_extern):
+                if (num_checked == 0 and not extern) or row[person]:
                     self.costs[person] += price_per_person
 
     @ui.refreshable
@@ -59,7 +66,6 @@ class TabData:
                             v-model="props.row[person.name]"
                             @update:model-value="() => $parent.$emit('checkbox_change', props.row)"
                             size="xs"
-                            class="no-padding no-margin"
                         />
                     </q-td>
                 </q-tr>
@@ -91,55 +97,27 @@ def main():
         *[{"name": person, "label": person, "field": person, "align": "center"} for person in people]
     ]
 
-    tabs_data = [
-        TabData("Target", [
-            ("Wild Fable", 15.00, True),
-            ("Brightroom", 30.00, True),
-            ("GG Water", 3.87, False),
-            ("Terra", 17.99, False),
-            ("Mushrooms", 3.39, False),
-            ("GG Vegetable", 2.39, False),
-            ("Grapes", 5.39, False),
-            ("GG Potatoes", 3.69, False),
-            ("GG Fruit", 1.25, False),
-            ("GG Herbs", 2.19, False),
-            ("Barilla", 5.67, False),
-            ("Encore", 8.99, False),
-            ("GG Cheese", 1.99, False),
-            ("Onion", 11.90, False),
-            ("GG Herbs", 2.19, False),
-            ("Alessi", 2.99, False),
-            ("GG Eggs", 6.29, False),
-            ("GG Yogurt", 3.69, False),
-            ("Tyson", 6.65, False),
-            ("Tyson", 7.85, False),
-            ("Deep Indian Vegetable", 4.99, False),
-            ("Vegetable", 1.99, False),
-            ("Cucumber", 0.69, False),
-            ("GG Shrimp", 9.99, False),
-            ("GG Apples", 4.29, False),
-            ("GG Vegetable", 1.99, False),
-            ("F Sheet Set", 15.00, True),
-            ("Vacuums", 59.99, True)
-        ])
-    ]
-
+    tabs_data = []
+        
+    with ui.dialog() as dialog, ui.card().style("min-width: 400px"):
+        name = ui.input(label='Name')
+        data_str = ui.textarea(label='List Data').style("width: 100%")
+        def add_tab():
+            data = TabData(name.value, eval(data_str.value))
+            tabs_data.append(data)
+            dialog.close()
+            tabs.update()
+            tabs_func.refresh()
+            tabs.set_value(data.name)
+        ui.button("Add").on("click", add_tab)
 
     @ui.refreshable
     def tabs_func():
-        def add_tab():
-            test_data = TabData("Test", [
-                ("BC Soon Tofu Soup Starter", 8.98, False),
-                ("Broccoli - Crown", 1.95, False),
-            ])
-            tabs_data.append(test_data)
-            tabs_func.refresh()
-
         with ui.tabs() as tabs:
             for tab_data in tabs_data:
                 ui.tab(tab_data.name)
             ui.element("div").classes("q-pa-sm")
-            ui.button(icon="add").on("click", add_tab)
+            ui.button(icon="add").on("click", dialog.open)
 
         with ui.tab_panels(tabs) as panels:
             for tab_data in tabs_data:
@@ -148,9 +126,10 @@ def main():
                         tab_data.display_list(columns)
                         tab_data.display_costs()
 
-        tabs.set_value(tabs_data[0].name)
+        return tabs
 
-    tabs_func()
+    tabs = tabs_func()
+    # tabs.set_value(tabs_data[0].name)
 
     load_dotenv()
     token = os.getenv("DEVICE-0_TOKEN")
