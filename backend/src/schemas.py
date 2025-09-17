@@ -22,16 +22,17 @@ class GroupResponse(GroupBase):
         from_attributes = True
 
 
-# reciept ---------------------------------------
+# receipt ---------------------------------------
 class ReceiptBase(BaseModel):
     processed: bool = False
-    raw_data: str | None = None
+    name: str
+    raw_data: str | None = None  # Optional raw receipt data
     paid_by: str | None = None  # Who paid for this receipt
     people: list[str] = []  # Receipt-specific people list
 
 
 class ReceiptCreate(ReceiptBase):
-    entries: list[ReceiptEntryCreate] | None = []
+    entries: list[ReceiptEntryCreate] = []
 
 
 class ReceiptResponse(ReceiptBase):
@@ -52,7 +53,7 @@ class GroupUpdate(BaseModel):
     people: list[str]
 
 
-# reciept entry ---------------------------------------
+# receipt entry ---------------------------------------
 class ReceiptEntryBase(BaseModel):
     name: str
     price: float

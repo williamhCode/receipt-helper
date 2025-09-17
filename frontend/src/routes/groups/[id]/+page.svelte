@@ -78,12 +78,13 @@
 				}
 			}
 
-			const receiptData = {
+      const receiptData = {
 				processed: true,
-				raw_data: data.name,
+				name: data.name,
+				raw_data: null, // TODO, store image if possible.
 				paid_by: data.paidBy || null,
 				people: data.people,
-				entries: entries
+				entries: entries,
 			};
 
 			await createReceipt(groupId, receiptData);
@@ -95,21 +96,20 @@
 		}
 	}
 
-	function updateAssignment(entryId: number, person: string, assigned: boolean) {
+  function updateAssignment(receiptId: number, entryId: number, person: string, assigned: boolean) {
 		if (!group) return;
 
 		// Find the receipt and entry to update
-		for (const receipt of group.receipts) {
-			const entry = receipt.entries.find(e => e.id === entryId);
-			if (entry) {
-				if (assigned && !entry.assigned_to.includes(person)) {
-					entry.assigned_to.push(person);
-				} else if (!assigned) {
-					entry.assigned_to = entry.assigned_to.filter(p => p !== person);
-				}
-				break;
-			}
-		}
+    const receipt = group.receipts.find(r => r.id === receiptId);
+    if (!receipt) return;
+    const entry = receipt.entries.find(e => e.id === entryId);
+    if (!entry) return;
+
+    if (assigned && !entry.assigned_to.includes(person)) {
+      entry.assigned_to.push(person);
+    } else if (!assigned) {
+      entry.assigned_to = entry.assigned_to.filter(p => p !== person);
+    }
 
 		// Force reactivity by reassigning
 		group = group;
@@ -127,11 +127,11 @@
 			<button
 				onclick={() => goto('/')}
 				class="text-blue-600 hover:text-blue-800 flex items-center space-x-2"
+        aria-label="Go back to groups list"
 			>
 				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
 				</svg>
-				<span>Back to Groups</span>
 			</button>
 			{#if group}
 				<h1 class="text-3xl font-bold text-gray-800">Group {group.id}</h1>
@@ -162,16 +162,16 @@
 					onUpdate={handleUpdateGroupMembers}
 				/>
 				
-				<div class="space-y-2 text-sm mt-4 pt-4 border-t">
-					<p><span class="font-medium">Group ID:</span> <span class="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{group.slug}</span></p>
-					<p><span class="font-medium">Total Receipts:</span> {group.receipts.length}</p>
-					<p><span class="font-medium">Unprocessed Total:</span> ${getUnprocessedReceiptsTotal(group).toFixed(2)}</p>
+				<div class="space-y-2 mt-4 pt-4 border-t">
+					<p><span class="font-medium text-lg">Group ID:</span> <span class="font-mono text-sm bg-gray-100 px-2 py-1 rounded">{group.slug}</span></p>
+					<p><span class="font-medium text-lg">Total Receipts:</span> {group.receipts.length}</p>
+					<p><span class="font-medium text-lg">Unprocessed Total:</span> ${getUnprocessedReceiptsTotal(group).toFixed(2)}</p>
 				</div>
 			</div>
 
 			<!-- Combined Cost Breakdown -->
 			<div class="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-lg border border-blue-200">
-				<h3 class="text-lg font-semibold text-gray-700 mb-4">Combined Balance</h3>
+				<h3 class="text-2xl font-semibold text-gray-700 mb-4">Combined Balance</h3>
 				<div class="grid grid-cols-1 gap-3">
 					{#each Object.entries(calculateCombinedCosts(group)) as [person, amount]}
 						<div class="bg-white p-3 rounded-lg shadow-sm">
@@ -180,7 +180,7 @@
 									<span class="font-medium text-xs bg-blue-200 text-blue-900 w-6 h-6 rounded-full flex items-center justify-center">
 										{getInitials(person)}
 									</span>
-									<span class="font-medium text-gray-700">{person}:</span>
+									<span class="font-medium text-lg text-gray-700">{person}:</span>
 								</div>
 								<span class="font-mono font-semibold" 
 									  class:text-green-600={amount < 0} 
@@ -189,7 +189,7 @@
 									{amount < 0 ? '+' : ''}{Math.abs(amount).toFixed(2)}
 								</span>
 							</div>
-							<div class="text-xs text-gray-500 mt-1 ml-8">
+							<div class="text-sm text-gray-500 mt-1 ml-8">
 								{amount < 0 ? 'Is owed' : amount > 0 ? 'Owes' : 'Even'}
 							</div>
 						</div>
@@ -201,7 +201,7 @@
 		<!-- Bottom Section: Horizontally Scrollable Receipts -->
 		<div class="bg-white rounded-lg shadow-md">
 			<div class="p-6 border-b">
-				<h3 class="text-lg font-semibold text-gray-700">Receipts</h3>
+				<h3 class="text-2xl font-semibold text-gray-700">Receipts</h3>
 			</div>
 			
 			{#if group.receipts.length === 0}
@@ -220,7 +220,7 @@
 								<!-- Receipt Header -->
 								<div class="flex justify-between items-start mb-4">
 									<div>
-										<h4 class="text-lg font-semibold text-gray-800">Receipt #{receipt.id}</h4>
+										<h4 class="text-lg font-semibold text-gray-800">{receipt.name}</h4>
 										<p class="text-sm text-gray-500">{new Date(receipt.created_at).toLocaleDateString()}</p>
 									</div>
 									<span class="text-xs px-2 py-1 rounded-full" 
@@ -232,10 +232,17 @@
 									</span>
 								</div>
 
+								<!-- Receipt Members Management -->
+								<div class="mb-4">
+									<ReceiptMembersManager 
+										bind:receiptPeople={receipt.people}
+										groupPeople={group.people}
+										onUpdate={(newPeople) => handleUpdateReceiptMembers(receipt.id, newPeople)}
+									/>
+								</div>
+
 								<!-- Receipt Info -->
 								<div class="mb-4 space-y-2 text-sm">
-									<p><span class="font-medium">Total:</span> ${calculateReceiptTotal(receipt).toFixed(2)}</p>
-									<p><span class="font-medium">Items:</span> {receipt.entries.length}</p>
 									{#if receipt.paid_by}
 										<p><span class="font-medium">Paid by:</span> 
 											<span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
@@ -245,18 +252,6 @@
 									{:else}
 										<p><span class="font-medium">Paid by:</span> <span class="text-gray-500">Not specified</span></p>
 									{/if}
-									{#if receipt.raw_data}
-										<p><span class="font-medium">Notes:</span> <span class="text-gray-600">{receipt.raw_data}</span></p>
-									{/if}
-								</div>
-
-								<!-- Receipt Members Management -->
-								<div class="mb-4">
-									<ReceiptMembersManager 
-										bind:receiptPeople={receipt.people}
-										groupPeople={group.people}
-										onUpdate={(newPeople) => handleUpdateReceiptMembers(receipt.id, newPeople)}
-									/>
 								</div>
 
 								<!-- Items Table -->
@@ -294,7 +289,7 @@
 																	<input
 																		type="checkbox"
 																		checked={entry.assigned_to.includes(person)}
-																		onchange={(e) => updateAssignment(entry.id, person, e.currentTarget.checked)}
+																		onchange={(e) => updateAssignment(receipt.id, entry.id, person, e.currentTarget.checked)}
 																		class="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
 																	/>
 																</td>

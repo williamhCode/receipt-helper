@@ -40,6 +40,7 @@ class Receipt(Base):
         DateTime, default=datetime.now(timezone.utc)
     )
 
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
     processed: Mapped[bool] = mapped_column(default=False)
 
     # Store the raw receipt data/image
@@ -70,7 +71,6 @@ class ReceiptEntry(Base):
     price: Mapped[float] = mapped_column(nullable=False)
     taxable: Mapped[bool] = mapped_column(default=True)
     
-    # Who is responsible for this item (JSON array of person names)
     assigned_to: Mapped[list[str]] = mapped_column(JSON, default=list)
     
     # Parent relationship

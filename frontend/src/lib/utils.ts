@@ -12,7 +12,8 @@ export interface Receipt {
 	id: number;
 	created_at: string;
 	processed: boolean;
-	raw_data: string | null;
+	name: string; // Required receipt name
+	raw_data: string | null; // Optional raw receipt data
 	paid_by: string | null;
 	group_id: number;
 	people: string[]; // Receipt-specific people list
@@ -94,17 +95,20 @@ export function calculateCombinedCosts(group: Group): Record<string, number> {
 
 	// Calculate what each person owes for items
 	group.receipts.forEach(receipt => {
+    if (receipt.processed) return;
+
 		const receiptCosts = calculateReceiptCosts(receipt, receipt.people);
 		receipt.people.forEach(person => {
 			costs[person] += receiptCosts[person];
 		});
+
+		if (receipt.paid_by && costs[receipt.paid_by] !== undefined) {
+			costs[receipt.paid_by] -= calculateReceiptTotal(receipt);
+		}
 	});
 
 	// Subtract what each person paid
 	group.receipts.forEach(receipt => {
-		if (receipt.paid_by && costs[receipt.paid_by] !== undefined) {
-			costs[receipt.paid_by] -= calculateReceiptTotal(receipt);
-		}
 	});
 
 	return costs;
@@ -152,7 +156,8 @@ export async function createSampleData() {
 
 export async function createReceipt(groupId: number, receiptData: {
 	processed: boolean;
-	raw_data: string;
+  name: string;
+	raw_data: string | null;
 	paid_by: string | null;
 	people: string[];
 	entries: any[];

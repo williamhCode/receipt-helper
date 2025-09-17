@@ -51,7 +51,7 @@
 
 <div class="space-y-3">
 	<div class="flex items-center justify-between">
-		<h3 class="text-lg font-semibold text-gray-700">Group Members</h3>
+		<h3 class="text-2xl font-semibold text-gray-700">Group Members</h3>
 		{#if !showAddForm}
 			<button
 				onclick={() => showAddForm = true}
