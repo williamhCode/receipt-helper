@@ -82,7 +82,7 @@
 					<div>
 						<label class="block text-sm font-medium text-gray-700 mb-1">Receipt Members</label>
 						<div class="text-sm text-gray-600 bg-blue-50 p-2 rounded border">
-							Will include: {defaultPeople().join(', ')}
+							{defaultPeople().join(', ')}
 							<div class="text-xs text-gray-500 mt-1">
 								{group.receipts.length > 0 ? 'Copied from most recent receipt' : 'Using all group members'}
 							</div>

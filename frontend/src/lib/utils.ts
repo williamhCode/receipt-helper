@@ -94,8 +94,8 @@ export function calculateCombinedCosts(group: Group): Record<string, number> {
 
 	// Calculate what each person owes for items
 	group.receipts.forEach(receipt => {
-		const receiptCosts = calculateReceiptCosts(receipt, group.people);
-		group.people.forEach(person => {
+		const receiptCosts = calculateReceiptCosts(receipt, receipt.people);
+		receipt.people.forEach(person => {
 			costs[person] += receiptCosts[person];
 		});
 	});
