@@ -44,6 +44,12 @@ class Receipt(Base):
 
     # Store the raw receipt data/image
     raw_data: Mapped[str] = mapped_column(Text, nullable=True)
+    
+    # Who paid for this receipt
+    paid_by: Mapped[str] = mapped_column(String(255), nullable=True)
+    
+    # Receipt-specific people list
+    people: Mapped[list[str]] = mapped_column(JSON, default=list)
 
     # parent
     group_id: Mapped[int] = mapped_column(ForeignKey("group_table.id"))

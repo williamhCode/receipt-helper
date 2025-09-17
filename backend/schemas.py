@@ -26,6 +26,8 @@ class GroupResponse(GroupBase):
 class ReceiptBase(BaseModel):
     processed: bool = False
     raw_data: str | None = None
+    paid_by: str | None = None  # Who paid for this receipt
+    people: list[str] = []  # Receipt-specific people list
 
 
 class ReceiptCreate(ReceiptBase):
@@ -40,6 +42,14 @@ class ReceiptResponse(ReceiptBase):
 
     class Config:
         from_attributes = True
+
+
+class ReceiptUpdate(BaseModel):
+    people: list[str]
+
+
+class GroupUpdate(BaseModel):
+    people: list[str]
 
 
 # reciept entry ---------------------------------------
@@ -63,6 +73,5 @@ class ReceiptEntryResponse(ReceiptEntryBase):
 
 
 # build models
-# ReceiptResponse.update_forward_refs()
-ReceiptResponse.model_rebuild();
-ReceiptEntryResponse.model_rebuild();
+ReceiptResponse.model_rebuild()
+ReceiptEntryResponse.model_rebuild()

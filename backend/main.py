@@ -3,14 +3,21 @@ from typing import Annotated
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from .models import Base, Group, Receipt, ReceiptEntry
-from .schemas import GroupCreate, GroupResponse, ReceiptCreate, ReceiptResponse
+from .schemas import (
+    GroupCreate, 
+    GroupResponse, 
+    GroupUpdate, 
+    ReceiptCreate, 
+    ReceiptResponse, 
+    ReceiptUpdate
+)
 
 # fastapi app -------------------------------------------------
-app = FastAPI(title="Reciept Helper", version="0.0.1")
+app = FastAPI(title="Receipt Helper", version="0.0.1")
 
 # Add CORS middleware to allow frontend to connect
 app.add_middleware(
@@ -22,7 +29,7 @@ app.add_middleware(
 )
 
 # database setup -----------------------------------------------
-db_url = "sqlite:///./reciept-helper.db"
+db_url = "sqlite:///./receipt-helper.db"
 engine = create_engine(db_url, connect_args={"check_same_thread": False})
 Session = sessionmaker(bind=engine)
 Base.metadata.create_all(bind=engine)
@@ -36,6 +43,13 @@ SessionDep = Annotated[Session, Depends(get_session)]
 
 
 # endpoints ---------------------------------------------------
+
+# Root endpoint
+@app.get("/")
+def root():
+    return {"message": "Receipt Helper API"}
+
+# Group endpoints
 @app.post("/groups/", response_model=GroupResponse)
 def create_group(group: GroupCreate, db: SessionDep):
     db_group = Group(
@@ -47,11 +61,9 @@ def create_group(group: GroupCreate, db: SessionDep):
     db.refresh(db_group)
     return db_group
 
-
 @app.get("/groups/", response_model=list[GroupResponse])
 def list_groups(db: SessionDep):
     return db.query(Group).all()
-
 
 @app.get("/groups/{group_id}", response_model=GroupResponse)
 def get_group(group_id: int, db: SessionDep):
@@ -60,8 +72,18 @@ def get_group(group_id: int, db: SessionDep):
         raise HTTPException(status_code=404, detail="Group not found")
     return group
 
+@app.patch("/groups/{group_id}", response_model=GroupResponse)
+def update_group(group_id: int, group_update: GroupUpdate, db: SessionDep):
+    group = db.query(Group).filter(Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    group.people = group_update.people
+    db.commit()
+    db.refresh(group)
+    return group
 
-# Receipts endpoints
+# Receipt endpoints
 @app.post("/groups/{group_id}/receipts/", response_model=ReceiptResponse)
 def create_receipt(group_id: int, receipt: ReceiptCreate, db: SessionDep):
     # Verify group exists
@@ -70,7 +92,11 @@ def create_receipt(group_id: int, receipt: ReceiptCreate, db: SessionDep):
         raise HTTPException(status_code=404, detail="Group not found")
 
     db_receipt = Receipt(
-        group_id=group_id, processed=receipt.processed, raw_data=receipt.raw_data
+        group_id=group_id, 
+        processed=receipt.processed, 
+        raw_data=receipt.raw_data,
+        paid_by=receipt.paid_by,
+        people=receipt.people
     )
     db.add(db_receipt)
     db.commit()
@@ -92,7 +118,6 @@ def create_receipt(group_id: int, receipt: ReceiptCreate, db: SessionDep):
     db.refresh(db_receipt)
     return db_receipt
 
-
 @app.get("/receipts/{receipt_id}", response_model=ReceiptResponse)
 def get_receipt(receipt_id: int, db: SessionDep):
     receipt = db.query(Receipt).filter(Receipt.id == receipt_id).first()
@@ -100,30 +125,39 @@ def get_receipt(receipt_id: int, db: SessionDep):
         raise HTTPException(status_code=404, detail="Receipt not found")
     return receipt
 
+@app.patch("/receipts/{receipt_id}", response_model=ReceiptResponse)
+def update_receipt(receipt_id: int, receipt_update: ReceiptUpdate, db: SessionDep):
+    receipt = db.query(Receipt).filter(Receipt.id == receipt_id).first()
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+    
+    receipt.people = receipt_update.people
+    db.commit()
+    db.refresh(receipt)
+    return receipt
 
 @app.get("/groups/{group_id}/receipts/", response_model=list[ReceiptResponse])
 def list_group_receipts(group_id: int, db: SessionDep):
     return db.query(Receipt).filter(Receipt.group_id == group_id).all()
 
-
-# Test endpoint
-@app.get("/")
-def root():
-    return {"message": "Receipt Helper API"}
-
-
-# Create some sample data
+# Sample data endpoint
 @app.post("/create-sample-data")
 def create_sample_data(db: SessionDep):
     # Create a sample group
-    group = Group(people=["William", "Hao", "Howard"], key_hash="sample_hash")
+    group = Group(
+        people=["William", "Hao", "Howard"], 
+        key_hash="sample_hash"
+    )
     db.add(group)
     db.commit()
     db.refresh(group)
 
     # Create a sample receipt
     receipt = Receipt(
-        group_id=group.id, processed=True, raw_data="Sample grocery receipt"
+        group_id=group.id, 
+        processed=True, 
+        raw_data="Sample grocery receipt",
+        people=["William", "Hao", "Howard"]  # Include all group members
     )
     db.add(receipt)
     db.commit()
