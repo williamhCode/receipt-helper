@@ -195,7 +195,7 @@ export async function updateGroup(groupId: number, groupData: { people: string[]
 	return await response.json() as Group;
 }
 
-export async function updateReceipt(receiptId: number, receiptData: { people: string[] }) {
+export async function updateReceipt(receiptId: number, receiptData: { people?: string[]; processed?: boolean }) {
 	const response = await fetch(`${API_BASE}/receipts/${receiptId}`, {
 		method: 'PATCH',
 		headers: {

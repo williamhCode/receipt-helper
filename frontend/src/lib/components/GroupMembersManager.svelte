@@ -11,13 +11,11 @@
 
 	let newMemberName = $state('');
 	let showAddForm = $state(false);
-	let loading = $state(false);
 
 	async function addMember() {
 		if (!newMemberName.trim()) return;
 		
 		try {
-			loading = true;
 			const updatedPeople = [...people, newMemberName.trim()];
 			await onUpdate(updatedPeople);
 			people = updatedPeople;
@@ -25,21 +23,16 @@
 			showAddForm = false;
 		} catch (error) {
 			console.error('Failed to add member:', error);
-		} finally {
-			loading = false;
 		}
 	}
 
 	async function removeMember(memberToRemove: string) {
 		try {
-			loading = true;
 			const updatedPeople = people.filter(person => person !== memberToRemove);
 			await onUpdate(updatedPeople);
 			people = updatedPeople;
 		} catch (error) {
 			console.error('Failed to remove member:', error);
-		} finally {
-			loading = false;
 		}
 	}
 
@@ -56,7 +49,6 @@
 			<button
 				onclick={() => showAddForm = true}
 				class="text-sm bg-blue-500 text-white px-2.5 py-1 rounded hover:bg-blue-600 transition-colors"
-				disabled={loading}
 			>
         + Add
 			</button>
@@ -73,7 +65,6 @@
 				<button
 					onclick={() => removeMember(person)}
 					class="opacity-0 group-hover:opacity-100 text-blue-600 hover:text-red-600 transition-all"
-					disabled={loading}
 					title="Remove {person}"
           aria-label="Remove {person} from group"
 				>
@@ -101,7 +92,7 @@
 				<!-- svelte-ignore a11y_consider_explicit_label -->
 				<button
 					onclick={addMember}
-					disabled={!newMemberName.trim() || loading}
+					disabled={!newMemberName.trim()}
 					class="text-green-600 hover:text-green-800 disabled:opacity-50"
 				>
 					<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">

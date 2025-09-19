@@ -18,14 +18,12 @@
 		type ReceiptEntry
 	} from '$lib/utils.js';
 	import ErrorDisplay from '$lib/components/ErrorDisplay.svelte';
-	import LoadingSpinner from '$lib/components/LoadingSpinner.svelte';
 	import NewReceiptModal from '$lib/components/NewReceiptModal.svelte';
 	import GroupMembersManager from '$lib/components/GroupMembersManager.svelte';
 	import ReceiptMembersManager from '$lib/components/ReceiptMembersManager.svelte';
 
 	// State using runes
 	let group = $state<Group | null>(null);
-	let loading = $state(false);
 	let error = $state('');
 	let showNewReceiptForm = $state(false);
 
@@ -34,13 +32,10 @@
 
 	async function loadGroup() {
 		try {
-			loading = true;
 			error = '';
 			group = await fetchGroup(groupId);
 		} catch (err) {
 			error = handleError(err, 'Failed to fetch group');
-		} finally {
-			loading = false;
 		}
 	}
 
@@ -62,11 +57,23 @@
 		}
 	}
 
+	async function handleToggleProcessed(receiptId: number, currentStatus: boolean) {
+		if (!group) return;
+		
+		try {
+			error = '';
+			
+			await updateReceipt(receiptId, { processed: !currentStatus });
+      await loadGroup();
+		} catch (err) {
+			error = handleError(err, 'Failed to update receipt status');
+		}
+	}
+
 	async function handleCreateReceipt(data: { name: string; paidBy: string; entries: string; people: string[] }) {
 		if (!group) return;
 		
 		try {
-			loading = true;
 			error = '';
 
 			let entries = [];
@@ -79,7 +86,7 @@
 			}
 
       const receiptData = {
-				processed: true,
+				processed: false,
 				name: data.name,
 				raw_data: null, // TODO, store image if possible.
 				paid_by: data.paidBy || null,
@@ -91,8 +98,6 @@
 			await loadGroup();
 		} catch (err) {
 			error = handleError(err, 'Failed to create receipt');
-		} finally {
-			loading = false;
 		}
 	}
 
@@ -147,10 +152,6 @@
 	</div>
 
 	<ErrorDisplay bind:error />
-
-	{#if loading}
-		<LoadingSpinner />
-	{/if}
 
 	{#if group}
 		<!-- Top Section: Group Info & Combined Costs -->
@@ -223,13 +224,19 @@
 										<h4 class="text-lg font-semibold text-gray-800">{receipt.name}</h4>
 										<p class="text-sm text-gray-500">{new Date(receipt.created_at).toLocaleDateString()}</p>
 									</div>
-									<span class="text-xs px-2 py-1 rounded-full" 
-										  class:bg-green-100={receipt.processed}
-										  class:text-green-800={receipt.processed}
-										  class:bg-yellow-100={!receipt.processed}
-										  class:text-yellow-800={!receipt.processed}>
+									<button
+										onclick={() => handleToggleProcessed(receipt.id, receipt.processed)}
+										class="text-xs px-2 py-1 rounded-full cursor-pointer transition-all duration-200 hover:shadow-md"
+										class:bg-green-100={receipt.processed}
+										class:text-green-800={receipt.processed}
+										class:hover:bg-green-200={receipt.processed}
+										class:bg-yellow-100={!receipt.processed}
+										class:text-yellow-800={!receipt.processed}
+										class:hover:bg-yellow-200={!receipt.processed}
+										title={receipt.processed ? 'Click to mark as unprocessed' : 'Click to mark as processed'}
+									>
 										{receipt.processed ? 'Processed' : 'Pending'}
-									</span>
+									</button>
 								</div>
 
 								<!-- Receipt Members Management -->
@@ -358,7 +365,6 @@
 	<NewReceiptModal 
 		bind:show={showNewReceiptForm} 
 		{group} 
-		{loading}
 		onSubmit={handleCreateReceipt}
 	/>
 </main>

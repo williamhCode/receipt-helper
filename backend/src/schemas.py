@@ -46,7 +46,8 @@ class ReceiptResponse(ReceiptBase):
 
 
 class ReceiptUpdate(BaseModel):
-    people: list[str]
+    people: list[str] | None = None
+    processed: bool | None = None
 
 
 class GroupUpdate(BaseModel):

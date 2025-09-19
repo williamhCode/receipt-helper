@@ -3,35 +3,27 @@
 	import { goto } from '$app/navigation';
 	import { fetchGroups, createSampleData, handleError, type Group } from '$lib/utils.js';
 	import ErrorDisplay from '$lib/components/ErrorDisplay.svelte';
-	import LoadingSpinner from '$lib/components/LoadingSpinner.svelte';
 
 	// State using runes
 	let groups = $state<Group[]>([]);
-	let loading = $state(false);
 	let error = $state('');
 
 	async function loadGroups() {
 		try {
-			loading = true;
 			error = '';
 			groups = await fetchGroups();
 		} catch (err) {
 			error = handleError(err, 'Failed to fetch groups');
-		} finally {
-			loading = false;
 		}
 	}
 
 	async function handleCreateSampleData() {
 		try {
-			loading = true;
 			error = '';
 			await createSampleData();
 			await loadGroups();
 		} catch (err) {
 			error = handleError(err, 'Failed to create sample data');
-		} finally {
-			loading = false;
 		}
 	}
 
@@ -49,23 +41,18 @@
 
 	<ErrorDisplay bind:error />
 
-	{#if loading}
-		<LoadingSpinner />
-	{/if}
-
 	<div class="bg-white p-6 rounded-lg shadow-md">
 		<div class="flex justify-between items-center mb-6">
 			<h2 class="text-xl font-semibold text-gray-700">Your Groups</h2>
 			<button 
 				onclick={handleCreateSampleData}
 				class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:opacity-50 transition-colors"
-				disabled={loading}
 			>
 				Create Sample Data
 			</button>
 		</div>
 
-		{#if groups.length === 0 && !loading}
+		{#if groups.length === 0}
 			<div class="text-center py-12">
 				<div class="text-gray-400 mb-4">
 					<svg class="w-16 h-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">

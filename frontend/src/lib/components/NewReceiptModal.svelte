@@ -4,12 +4,10 @@
 	let { 
 		show = $bindable(), 
 		group, 
-		loading = false,
 		onSubmit 
 	}: { 
 		show: boolean; 
 		group: Group | null; 
-		loading?: boolean;
 		onSubmit: (data: { name: string; paidBy: string; entries: string; people: string[] }) => Promise<void>;
 	} = $props();
 
@@ -109,10 +107,10 @@
 			<div class="flex space-x-3 mt-6">
 				<button
 					onclick={handleSubmit}
-					disabled={!newReceiptName.trim() || loading}
+					disabled={!newReceiptName.trim()}
 					class="flex-1 bg-blue-500 text-white py-2 rounded hover:bg-blue-600 disabled:opacity-50 transition-colors"
 				>
-					{loading ? 'Creating...' : 'Create Receipt'}
+					Create Receipt
 				</button>
 				<button
 					onclick={handleClose}

@@ -131,7 +131,13 @@ def update_receipt(receipt_id: int, receipt_update: ReceiptUpdate, db: SessionDe
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
     
-    receipt.people = receipt_update.people
+    # Only update fields that are provided (not None)
+    if receipt_update.people is not None:
+        receipt.people = receipt_update.people
+    
+    if receipt_update.processed is not None:
+        receipt.processed = receipt_update.processed
+    
     db.commit()
     db.refresh(receipt)
     return receipt
