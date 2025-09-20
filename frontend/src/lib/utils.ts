@@ -1,4 +1,10 @@
 // Types
+export interface Person {
+	id: number;
+	name: string;
+	created_at: string;
+}
+
 export interface ReceiptEntry {
 	id: number;
 	name: string;
@@ -93,7 +99,6 @@ export function calculateCombinedCosts(group: Group): Record<string, number> {
 	const costs: Record<string, number> = {};
 	group.people.forEach(person => costs[person] = 0);
 
-	// Calculate what each person owes for items
 	group.receipts.forEach(receipt => {
     if (receipt.processed) return;
 
@@ -105,10 +110,6 @@ export function calculateCombinedCosts(group: Group): Record<string, number> {
 		if (receipt.paid_by && costs[receipt.paid_by] !== undefined) {
 			costs[receipt.paid_by] -= calculateReceiptTotal(receipt);
 		}
-	});
-
-	// Subtract what each person paid
-	group.receipts.forEach(receipt => {
 	});
 
 	return costs;
@@ -210,4 +211,80 @@ export async function updateReceipt(receiptId: number, receiptData: { people?: s
 	}
 
 	return await response.json() as Receipt;
+}
+
+export async function updateReceiptEntry(entryId: number, assignedTo: string[]) {
+	const response = await fetch(`${API_BASE}/receipt-entries/${entryId}`, {
+		method: 'PATCH',
+		headers: {
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({ assigned_to: assignedTo })
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text().catch(() => 'Unknown server error');
+		throw new Error(`HTTP ${response.status} (${response.statusText}): ${errorText}`);
+	}
+
+	return await response.json();
+}
+
+// NEW: Person management functions
+export async function fetchPeople() {
+	const response = await fetch(`${API_BASE}/people/`);
+	
+	if (!response.ok) {
+		const errorText = await response.text().catch(() => 'Unknown server error');
+		throw new Error(`HTTP ${response.status} (${response.statusText}): ${errorText}`);
+	}
+	
+	return await response.json() as Person[];
+}
+
+export async function createPerson(name: string) {
+	const response = await fetch(`${API_BASE}/people/`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({ name })
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text().catch(() => 'Unknown server error');
+		throw new Error(`HTTP ${response.status} (${response.statusText}): ${errorText}`);
+	}
+
+	return await response.json() as Person;
+}
+
+export async function updatePerson(personId: number, name: string) {
+	const response = await fetch(`${API_BASE}/people/${personId}`, {
+		method: 'PATCH',
+		headers: {
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({ name })
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text().catch(() => 'Unknown server error');
+		throw new Error(`HTTP ${response.status} (${response.statusText}): ${errorText}`);
+	}
+
+	return await response.json() as Person;
+}
+
+export async function deletePerson(personId: number) {
+	const response = await fetch(`${API_BASE}/people/${personId}`, {
+		method: 'DELETE',
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text().catch(() => 'Unknown server error');
+		throw new Error(`HTTP ${response.status} (${response.statusText}): ${errorText}`);
+	}
+
+	return await response.json();
 }

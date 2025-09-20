@@ -1,5 +1,7 @@
+<!-- src/routes/groups/[id]/+page.svelte -->
+
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { 
@@ -17,6 +19,7 @@
 		type Receipt,
 		type ReceiptEntry
 	} from '$lib/utils.js';
+	import { realtimeStore } from '$lib/stores/realtime.svelte.js';
 	import ErrorDisplay from '$lib/components/ErrorDisplay.svelte';
 	import NewReceiptModal from '$lib/components/NewReceiptModal.svelte';
 	import GroupMembersManager from '$lib/components/GroupMembersManager.svelte';
@@ -30,41 +33,56 @@
 	// Derived state
 	const groupId = $derived(parseInt($page.params.id));
 
-	async function loadGroup() {
+	// Track entries being updated to prevent conflicts
+	let updatingEntries = $state(new Set<number>());
+
+	// THE UNIVERSAL REFRESH FUNCTION - called for any update
+	async function refreshGroup() {
 		try {
 			error = '';
 			group = await fetchGroup(groupId);
 		} catch (err) {
-			error = handleError(err, 'Failed to fetch group');
+			error = handleError(err, 'Failed to refresh group');
 		}
 	}
 
+	// Initial load
+	async function loadGroup() {
+		await refreshGroup();
+	}
+
+	// All the handler functions now just do their API call and let WebSocket handle refresh
 	async function handleUpdateGroupMembers(newPeople: string[]) {
 		if (!group) return;
-		await updateGroup(groupId, { people: newPeople });
-		group.people = newPeople;
+		try {
+			await updateGroup(groupId, { people: newPeople });
+			// Don't update local state - WebSocket will trigger refreshGroup()
+		} catch (err) {
+			error = handleError(err, 'Failed to update group members');
+		}
+	}
+
+	async function handlePersonRenamed() {
+		// Just refresh - the WebSocket will have already triggered this anyway
+		await refreshGroup();
 	}
 
 	async function handleUpdateReceiptMembers(receiptId: number, newPeople: string[]) {
 		if (!group) return;
-		await updateReceipt(receiptId, { people: newPeople });
-		
-		// Update the receipt in the group
-		const receipt = group.receipts.find(r => r.id === receiptId);
-		if (receipt) {
-			receipt.people = newPeople;
-			group = group; // Force reactivity
+		try {
+			await updateReceipt(receiptId, { people: newPeople });
+			// Don't update local state - WebSocket will trigger refreshGroup()
+		} catch (err) {
+			error = handleError(err, 'Failed to update receipt members');
 		}
 	}
 
 	async function handleToggleProcessed(receiptId: number, currentStatus: boolean) {
 		if (!group) return;
-		
 		try {
 			error = '';
-			
 			await updateReceipt(receiptId, { processed: !currentStatus });
-      await loadGroup();
+			// Don't update local state - WebSocket will trigger refreshGroup()
 		} catch (err) {
 			error = handleError(err, 'Failed to update receipt status');
 		}
@@ -72,7 +90,6 @@
 
 	async function handleCreateReceipt(data: { name: string; paidBy: string; entries: string; people: string[] }) {
 		if (!group) return;
-		
 		try {
 			error = '';
 
@@ -85,43 +102,108 @@
 				}
 			}
 
-      const receiptData = {
+			const receiptData = {
 				processed: false,
 				name: data.name,
-				raw_data: null, // TODO, store image if possible.
+				raw_data: null,
 				paid_by: data.paidBy || null,
 				people: data.people,
 				entries: entries,
 			};
 
 			await createReceipt(groupId, receiptData);
-			await loadGroup();
+			// Don't update local state - WebSocket will trigger refreshGroup()
 		} catch (err) {
 			error = handleError(err, 'Failed to create receipt');
 		}
 	}
 
-  function updateAssignment(receiptId: number, entryId: number, person: string, assigned: boolean) {
+	// Checkbox toggling with highlighting
+	async function updateAssignment(receiptId: number, entryId: number, person: string, assigned: boolean) {
 		if (!group) return;
 
-		// Find the receipt and entry to update
-    const receipt = group.receipts.find(r => r.id === receiptId);
-    if (!receipt) return;
-    const entry = receipt.entries.find(e => e.id === entryId);
-    if (!entry) return;
+		// Prevent multiple simultaneous updates to the same entry
+		if (updatingEntries.has(entryId)) {
+			return;
+		}
 
-    if (assigned && !entry.assigned_to.includes(person)) {
-      entry.assigned_to.push(person);
-    } else if (!assigned) {
-      entry.assigned_to = entry.assigned_to.filter(p => p !== person);
-    }
+		try {
+			updatingEntries.add(entryId);
 
-		// Force reactivity by reassigning
-		group = group;
+			// Find the receipt and entry to update
+			const receipt = group.receipts.find(r => r.id === receiptId);
+			if (!receipt) return;
+			const entry = receipt.entries.find(e => e.id === entryId);
+			if (!entry) return;
+
+			// Calculate new assignment list
+			let newAssignedTo = [...entry.assigned_to];
+			if (assigned && !newAssignedTo.includes(person)) {
+				newAssignedTo.push(person);
+			} else if (!assigned) {
+				newAssignedTo = newAssignedTo.filter(p => p !== person);
+			}
+
+			// Update optimistically for immediate feedback
+			entry.assigned_to = newAssignedTo;
+			group = group; // Force reactivity
+
+			// Update via API (this will trigger WebSocket refresh for others)
+			await realtimeStore.updateEntry(entryId, newAssignedTo);
+
+		} catch (err) {
+			// If backend update fails, refresh to get correct state
+			error = handleError(err, 'Failed to update assignment');
+			await refreshGroup();
+		} finally {
+			updatingEntries.delete(entryId);
+		}
 	}
 
-	onMount(() => {
-		loadGroup();
+	// Handle entry highlighting when others make changes
+	function highlightEntry(entryId: number) {
+		// Skip if this entry is currently being updated by this client
+		if (updatingEntries.has(entryId)) {
+			return;
+		}
+
+		// Visual feedback for the updated entry
+		setTimeout(() => {
+			const entryElement = document.querySelector(`[data-entry-id="${entryId}"]`);
+			if (entryElement) {
+				entryElement.classList.add('bg-blue-100');
+				setTimeout(() => {
+					entryElement.classList.remove('bg-blue-100');
+				}, 1000);
+			}
+		}, 100);
+	}
+
+	// Setup real-time connection
+	async function initializeRealtime() {
+		try {
+			// Set up the ONE universal callback
+			realtimeStore.onRefreshGroup = refreshGroup;
+			
+			// Set up entry highlighting
+			realtimeStore.onEntryHighlight = highlightEntry;
+			
+			// Connect to the group's WebSocket
+			await realtimeStore.connect(groupId);
+		} catch (err) {
+			console.error('Failed to initialize real-time connection:', err);
+			// Don't show error to user since app works without real-time
+		}
+	}
+
+	// Lifecycle
+	onMount(async () => {
+		await loadGroup();
+		await initializeRealtime();
+	});
+
+	onDestroy(() => {
+		realtimeStore.disconnect();
 	});
 </script>
 
@@ -140,6 +222,22 @@
 			</button>
 			{#if group}
 				<h1 class="text-3xl font-bold text-gray-800">Group {group.id}</h1>
+				<!-- Simple connection indicator -->
+				{#if realtimeStore.isConnected}
+					<span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full flex items-center space-x-1">
+						<div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+						<span>Live</span>
+					</span>
+				{:else if realtimeStore.isConnecting}
+					<span class="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full flex items-center space-x-1">
+						<div class="w-2 h-2 bg-yellow-500 rounded-full animate-ping"></div>
+						<span>Connecting...</span>
+					</span>
+				{:else}
+					<span class="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded-full">
+						Offline
+					</span>
+				{/if}
 			{/if}
 		</div>
 		
@@ -161,6 +259,8 @@
 				<GroupMembersManager 
 					bind:people={group.people} 
 					onUpdate={handleUpdateGroupMembers}
+					onPersonRenamed={handlePersonRenamed}
+					{group}
 				/>
 				
 				<div class="space-y-2 mt-4 pt-4 border-t">
@@ -217,7 +317,7 @@
 				<div class="p-6">
 					<div class="flex space-x-6 overflow-x-auto pb-4">
 						{#each group.receipts as receipt}
-							<div class="flex-shrink-0 w-[700px] bg-gray-50 border border-gray-200 rounded-lg p-4" style="scroll-snap-align: start;">
+							<div class="flex-shrink-0 w-[700px] bg-gray-50 border border-gray-200 rounded-lg p-4 transition-colors duration-200" style="scroll-snap-align: start;">
 								<!-- Receipt Header -->
 								<div class="flex justify-between items-start mb-4">
 									<div>
@@ -279,7 +379,10 @@
 												</thead>
 												<tbody>
 													{#each receipt.entries as entry}
-														<tr class="border-t border-gray-100 hover:bg-gray-50">
+														<tr 
+															class="border-t border-gray-100 hover:bg-gray-50 transition-colors duration-200"
+															data-entry-id={entry.id}
+														>
 															<td class="p-2 text-gray-800 text-xs pr-1" title={entry.name}>
 																<div>{entry.name}</div>
 															</td>
@@ -296,8 +399,11 @@
 																	<input
 																		type="checkbox"
 																		checked={entry.assigned_to.includes(person)}
+																		disabled={updatingEntries.has(entry.id)}
 																		onchange={(e) => updateAssignment(receipt.id, entry.id, person, e.currentTarget.checked)}
-																		class="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+																		class="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-opacity"
+																		class:opacity-50={updatingEntries.has(entry.id)}
+																		title={updatingEntries.has(entry.id) ? 'Updating...' : 'Click to toggle assignment'}
 																	/>
 																</td>
 															{/each}

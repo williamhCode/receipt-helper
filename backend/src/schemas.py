@@ -3,13 +3,34 @@ from pydantic import BaseModel
 from datetime import datetime
 
 
+# person -------------------------------------
+class PersonBase(BaseModel):
+    name: str
+
+
+class PersonCreate(PersonBase):
+    pass
+
+
+class PersonResponse(PersonBase):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PersonUpdate(BaseModel):
+    name: str
+
+
 # group -------------------------------------
 class GroupBase(BaseModel):
-    people: list[str]
+    people: list[PersonResponse]
 
 
-class GroupCreate(GroupBase):
-    pass
+class GroupCreate(BaseModel):
+    people: list[str]  # Accept list of names, convert to Person objects
 
 
 class GroupResponse(GroupBase):
@@ -27,11 +48,16 @@ class ReceiptBase(BaseModel):
     processed: bool = False
     name: str
     raw_data: str | None = None  # Optional raw receipt data
-    paid_by: str | None = None  # Who paid for this receipt
-    people: list[str] = []  # Receipt-specific people list
+    paid_by: PersonResponse | None = None  # Who paid for this receipt
+    people: list[PersonResponse] = []  # Receipt-specific people list
 
 
-class ReceiptCreate(ReceiptBase):
+class ReceiptCreate(BaseModel):
+    processed: bool = False
+    name: str
+    raw_data: str | None = None
+    paid_by: str | None = None  # Accept person name, convert to Person object
+    people: list[str] = []  # Accept list of names, convert to Person objects
     entries: list[ReceiptEntryCreate] = []
 
 
@@ -46,12 +72,12 @@ class ReceiptResponse(ReceiptBase):
 
 
 class ReceiptUpdate(BaseModel):
-    people: list[str] | None = None
+    people: list[str] | None = None  # Accept list of names
     processed: bool | None = None
 
 
 class GroupUpdate(BaseModel):
-    people: list[str]
+    people: list[str]  # Accept list of names
 
 
 # receipt entry ---------------------------------------
@@ -59,11 +85,14 @@ class ReceiptEntryBase(BaseModel):
     name: str
     price: float
     taxable: bool = True
-    assigned_to: list[str] = []
+    assigned_to: list[PersonResponse] = []
 
 
-class ReceiptEntryCreate(ReceiptEntryBase):
-    pass
+class ReceiptEntryCreate(BaseModel):
+    name: str
+    price: float
+    taxable: bool = True
+    assigned_to: list[str] = []  # Accept list of names, convert to Person objects
 
 
 class ReceiptEntryResponse(ReceiptEntryBase):
@@ -74,6 +103,11 @@ class ReceiptEntryResponse(ReceiptEntryBase):
         from_attributes = True
 
 
+class ReceiptEntryUpdate(BaseModel):
+    assigned_to: list[str]
+
+
 # build models
 ReceiptResponse.model_rebuild()
 ReceiptEntryResponse.model_rebuild()
+GroupResponse.model_rebuild()
