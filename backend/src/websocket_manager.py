@@ -48,7 +48,7 @@ class ConnectionManager:
             
             logger.info(f"Client disconnected from group {group_id}")
 
-    async def broadcast_to_group(self, group_id: int, message: dict, exclude_websocket: WebSocket = None):
+    async def broadcast_to_group(self, group_id: int, message: dict, exclude_websocket: WebSocket | None = None):
         """Send a message to all connections in a group, optionally excluding one"""
         if group_id not in self.group_connections:
             return

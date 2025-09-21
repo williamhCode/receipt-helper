@@ -278,7 +278,7 @@
 						<div class="bg-white p-3 rounded-lg shadow-sm">
 							<div class="flex justify-between items-center">
 								<div class="flex items-center space-x-2">
-									<span class="font-medium text-xs bg-blue-200 text-blue-900 w-6 h-6 rounded-full flex items-center justify-center">
+									<span class="font-medium text-xs bg-blue-200 text-blue-900 w-7 h-6 rounded-full flex items-center justify-center">
 										{getInitials(person)}
 									</span>
 									<span class="font-medium text-lg text-gray-700">{person}:</span>
