@@ -14,6 +14,7 @@ from .schemas import (
     GroupCreate,
     GroupResponse,
     GroupUpdate,
+    GroupNameUpdate,  # NEW: Import the new schema
     ReceiptCreate,
     ReceiptResponse,
     ReceiptUpdate,
@@ -94,6 +95,7 @@ def group_to_response(group: Group) -> dict:
         "id": group.id,
         "created_at": group.created_at.isoformat(),  # Convert to string
         "slug": group.slug,
+        "name": group.name,  # NEW: Include the name field
         "people": persons_to_names(group.people),
         "receipts": [receipt_to_response(receipt) for receipt in group.receipts]
     }
@@ -256,8 +258,14 @@ async def create_group(group: GroupCreate, db: SessionDep):
     db_group = Group(
         people=people,
         key_hash="placeholder_hash",
+        name="",  # Temporary empty name - will be set after commit to get ID
     )
     db.add(db_group)
+    db.commit()
+    db.refresh(db_group)
+    
+    # NEW: Set the default name to "Group #{id}" after getting the ID
+    db_group.name = f"Group {db_group.id}"
     db.commit()
     db.refresh(db_group)
     
@@ -284,13 +292,37 @@ async def update_group(group_id: int, group_update: GroupUpdate, db: SessionDep)
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    people = get_persons_from_names(db, group_update.people)
-    group.people = people
+    # NEW: Handle name updates
+    if group_update.name is not None:
+        group.name = group_update.name
+    
+    if group_update.people is not None:
+        people = get_persons_from_names(db, group_update.people)
+        group.people = people
+        
     db.commit()
     db.refresh(group)
     
     # Broadcast update
-    await broadcast_group_update(group_id, "group_members_updated")
+    await broadcast_group_update(group_id, "group_updated")
+    
+    return group_to_response(group)
+
+
+# NEW: Dedicated endpoint for updating just the group name
+@app.patch("/groups/{group_id}/name")
+async def update_group_name(group_id: int, name_update: GroupNameUpdate, db: SessionDep):
+    """Update only the group name - useful for inline editing"""
+    group = db.query(Group).filter(Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    group.name = name_update.name
+    db.commit()
+    db.refresh(group)
+    
+    # Broadcast name update specifically
+    await broadcast_group_update(group_id, "group_name_updated")
     
     return group_to_response(group)
 
@@ -427,10 +459,17 @@ async def create_sample_data(db: SessionDep):
     
     group = Group(
         people=[william, hao, howard], 
-        key_hash="sample_hash"
+        key_hash="sample_hash",
+        name=""  # Temporary empty name
     )
     db.add(group)
-    db.flush()
+    db.commit()
+    db.refresh(group)
+    
+    # Set the default name pattern
+    group.name = f"Group #{group.id}"
+    db.commit()
+    db.refresh(group)
 
     sample_receipts = [
         {

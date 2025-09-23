@@ -30,6 +30,7 @@ export interface Group {
 	id: number;
 	created_at: string;
 	slug: string;
+  name: string;
 	people: string[];
 	receipts: Receipt[];
 }
@@ -135,6 +136,40 @@ export async function fetchGroups() {
 
 export async function fetchGroup(groupId: number) {
 	const response = await fetch(`${API_BASE}/groups/${groupId}`);
+	
+	if (!response.ok) {
+		const errorText = await response.text().catch(() => 'Unknown server error');
+		throw new Error(`HTTP ${response.status} (${response.statusText}): ${errorText}`);
+	}
+	
+	return await response.json() as Group;
+}
+
+export async function createGroup(groupData: { people: string[] }) {
+	const response = await fetch(`${API_BASE}/groups/`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify(groupData)
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text().catch(() => 'Unknown server error');
+		throw new Error(`HTTP ${response.status} (${response.statusText}): ${errorText}`);
+	}
+
+	return await response.json() as Group;
+}
+
+export async function updateGroupName(groupId: number, newName: string) {
+	const response = await fetch(`${API_BASE}/groups/${groupId}/name`, {
+		method: 'PATCH',
+		headers: {
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({ name: newName }),
+	});
 	
 	if (!response.ok) {
 		const errorText = await response.text().catch(() => 'Unknown server error');

@@ -24,6 +24,7 @@
 	import NewReceiptModal from '$lib/components/NewReceiptModal.svelte';
 	import GroupMembersManager from '$lib/components/GroupMembersManager.svelte';
 	import ReceiptMembersManager from '$lib/components/ReceiptMembersManager.svelte';
+	import EditableGroupName from '$lib/components/EditableGroupName.svelte';
 
 	// State using runes
 	let group = $state<Group | null>(null);
@@ -49,6 +50,15 @@
 	// Initial load
 	async function loadGroup() {
 		await refreshGroup();
+	}
+
+	// NEW: Handle group name updates
+	function handleGroupNameUpdate(newName: string) {
+		if (group) {
+			group.name = newName;
+			// Trigger reactivity
+			group = group;
+		}
 	}
 
 	// All the handler functions now just do their API call and let WebSocket handle refresh
@@ -220,8 +230,17 @@
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
 				</svg>
 			</button>
+			
 			{#if group}
-				<h1 class="text-3xl font-bold text-gray-800">Group {group.id}</h1>
+				<div class="group">
+					<!-- NEW: Replace static title with editable component -->
+					<EditableGroupName 
+						{groupId}
+						initialName={group.name}
+						onNameUpdate={handleGroupNameUpdate}
+					/>
+				</div>
+				
 				<!-- Simple connection indicator -->
 				{#if realtimeStore.isConnected}
 					<span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full flex items-center space-x-1">

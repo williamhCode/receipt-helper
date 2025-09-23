@@ -26,11 +26,13 @@ class PersonUpdate(BaseModel):
 
 # group -------------------------------------
 class GroupBase(BaseModel):
+    name: str
     people: list[PersonResponse]
 
 
 class GroupCreate(BaseModel):
     people: list[str]  # Accept list of names, convert to Person objects
+    # name is optional in creation - will default to "Group #{id}"
 
 
 class GroupResponse(GroupBase):
@@ -41,6 +43,16 @@ class GroupResponse(GroupBase):
 
     class Config:
         from_attributes = True
+
+
+class GroupUpdate(BaseModel):
+    people: list[str] | None = None  # Accept list of names
+    name: str | None = None  # Allow updating just the name
+
+
+# NEW: Dedicated schema for updating just the group name
+class GroupNameUpdate(BaseModel):
+    name: str
 
 
 # receipt ---------------------------------------
@@ -74,10 +86,6 @@ class ReceiptResponse(ReceiptBase):
 class ReceiptUpdate(BaseModel):
     people: list[str] | None = None  # Accept list of names
     processed: bool | None = None
-
-
-class GroupUpdate(BaseModel):
-    people: list[str]  # Accept list of names
 
 
 # receipt entry ---------------------------------------

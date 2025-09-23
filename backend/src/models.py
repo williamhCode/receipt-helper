@@ -77,6 +77,7 @@ class Group(Base):
         String(22), unique=True, default=new_slug, index=True
     )
     key_hash: Mapped[str] = mapped_column(nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
 
     people: Mapped[list[Person]] = relationship(
         secondary=group_person_association, back_populates="groups"

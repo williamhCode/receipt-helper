@@ -1,6 +1,6 @@
 # src/websocket_manager.py
 
-from typing import Dict, List, Set
+from typing import Dict, Set
 from fastapi import WebSocket
 import json
 import logging
