@@ -274,6 +274,23 @@ export async function updateReceipt(receiptId: number, receiptData: { people?: s
 	return await response.json() as Receipt;
 }
 
+export async function updateReceiptPaidBy(receiptId: number, paidBy: string | null) {
+	const response = await fetch(`${API_BASE}/receipts/${receiptId}`, {
+		method: 'PATCH',
+		headers: {
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({ paid_by: paidBy ?? '' })
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text().catch(() => 'Unknown server error');
+		throw new Error(`HTTP ${response.status} (${response.statusText}): ${errorText}`);
+	}
+
+	return await response.json() as Receipt;
+}
+
 export async function updateReceiptEntry(entryId: number, assignedTo: string[]) {
 	const response = await fetch(`${API_BASE}/receipt-entries/${entryId}`, {
 		method: 'PATCH',
@@ -289,23 +306,6 @@ export async function updateReceiptEntry(entryId: number, assignedTo: string[]) 
 	}
 
 	return await response.json();
-}
-
-export async function updateReceiptPaidBy(receiptId: number, paidBy: string | null) {
-	const response = await fetch(`${API_BASE}/receipts/${receiptId}`, {
-		method: 'PATCH',
-		headers: {
-			'Content-Type': 'application/json',
-		},
-		body: JSON.stringify({ paid_by: paidBy })
-	});
-
-	if (!response.ok) {
-		const errorText = await response.text().catch(() => 'Unknown server error');
-		throw new Error(`HTTP ${response.status} (${response.statusText}): ${errorText}`);
-	}
-
-	return await response.json() as Receipt;
 }
 
 // Update receipt entry details (name, price, taxable)

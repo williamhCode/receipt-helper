@@ -466,10 +466,9 @@ async def update_receipt(
     if receipt_update.processed is not None:
         receipt.processed = receipt_update.processed
 
-    # NEW: Handle paid_by updates
-    if receipt_update.paid_by == "" or receipt_update.paid_by is None:
+    if receipt_update.paid_by == "":
         receipt.paid_by_id = None
-    else:
+    elif receipt_update.paid_by is not None:
         paid_by_person = get_or_create_person(db, receipt_update.paid_by)
         receipt.paid_by_person = paid_by_person
 
