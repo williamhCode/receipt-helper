@@ -82,7 +82,9 @@ class Group(Base):
     people: Mapped[list[Person]] = relationship(
         secondary=group_person_association, back_populates="groups"
     )
-    receipts: Mapped[list["Receipt"]] = relationship(back_populates="group")
+    receipts: Mapped[list["Receipt"]] = relationship(
+        back_populates="group", cascade="all, delete-orphan"
+    )
 
 
 class Receipt(Base):
