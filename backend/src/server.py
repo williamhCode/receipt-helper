@@ -52,7 +52,7 @@ if db_url is None:
     engine = create_engine(db_url, connect_args={"check_same_thread": False})
 else:
     engine = create_engine(db_url, pool_pre_ping=True)
-Base.metadata.create_all(bind=engine)
+# Base.metadata.create_all(bind=engine)
 
 
 # dependency --------------------------------------------------
