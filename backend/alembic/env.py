@@ -4,11 +4,16 @@ from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
-import os
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+import os
+db_url = os.getenv(
+    "DATABASE_URL", "postgresql://williamhou@localhost:5432/receipt_helper"
+)
+config.set_main_option('sqlalchemy.url', db_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -38,9 +43,7 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = os.getenv(
-        "DATABASE_URL", "postgresql://williamhou@localhost:5432/receipt_helper"
-    )
+    url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
         target_metadata=target_metadata,
