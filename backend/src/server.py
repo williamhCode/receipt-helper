@@ -46,14 +46,11 @@ app.add_middleware(
 )
 
 # database setup -----------------------------------------------
-db_url = os.getenv("DATABASE_URL")
-if db_url is None:
-    db_url = "sqlite:///./receipt-helper.db"
-    engine = create_engine(db_url, connect_args={"check_same_thread": False})
-else:
-    engine = create_engine(db_url, pool_pre_ping=True)
+db_url = os.getenv(
+    "DATABASE_URL", "postgresql://williamhou@localhost:5432/receipt_helper"
+)
+engine = create_engine(db_url, pool_pre_ping=True)
 # Base.metadata.create_all(bind=engine)
-
 
 # dependency --------------------------------------------------
 def get_session():

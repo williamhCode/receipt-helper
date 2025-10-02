@@ -1,8 +1,9 @@
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Table
+from sqlalchemy import func
 
-from datetime import datetime, timezone
+from datetime import datetime
 import base64, uuid
 
 
@@ -44,9 +45,7 @@ class Person(Base):
     __tablename__ = "person_table"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now(timezone.utc)
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
 
@@ -69,9 +68,7 @@ class Group(Base):
     __tablename__ = "group_table"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now(timezone.utc)
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     slug: Mapped[str] = mapped_column(
         String(22), unique=True, default=new_slug, index=True
@@ -93,9 +90,7 @@ class Receipt(Base):
     __tablename__ = "receipt_table"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now(timezone.utc)
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     processed: Mapped[bool] = mapped_column(default=False)
