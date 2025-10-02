@@ -36,7 +36,7 @@ export interface Group {
 }
 
 // Constants
-export const API_BASE = 'http://localhost:8000';
+export const API_BASE = import.meta.env.VITE_BACKEND_HOST || 'http://localhost:8000';
 export const TAX_RATE = 0.07;
 
 // Utility functions
@@ -162,6 +162,19 @@ export async function createGroup(groupData: { people: string[] }) {
 	return await response.json() as Group;
 }
 
+export async function deleteGroup(groupId: number) {
+	const response = await fetch(`${API_BASE}/groups/${groupId}`, {
+		method: 'DELETE',
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text().catch(() => 'Unknown server error');
+		throw new Error(`HTTP ${response.status} (${response.statusText}): ${errorText}`);
+	}
+
+	return await response.json();
+}
+
 export async function updateGroupName(groupId: number, newName: string) {
 	const response = await fetch(`${API_BASE}/groups/${groupId}/name`, {
 		method: 'PATCH',
@@ -214,6 +227,19 @@ export async function createReceipt(groupId: number, receiptData: {
 	return await response.json() as Receipt;
 }
 
+export async function deleteReceipt(receiptId: number) {
+	const response = await fetch(`${API_BASE}/receipts/${receiptId}`, {
+		method: 'DELETE',
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text().catch(() => 'Unknown server error');
+		throw new Error(`HTTP ${response.status} (${response.statusText}): ${errorText}`);
+	}
+
+	return await response.json();
+}
+
 export async function updateGroup(groupId: number, groupData: { people: string[] }) {
 	const response = await fetch(`${API_BASE}/groups/${groupId}`, {
 		method: 'PATCH',
@@ -255,6 +281,79 @@ export async function updateReceiptEntry(entryId: number, assignedTo: string[]) 
 			'Content-Type': 'application/json',
 		},
 		body: JSON.stringify({ assigned_to: assignedTo })
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text().catch(() => 'Unknown server error');
+		throw new Error(`HTTP ${response.status} (${response.statusText}): ${errorText}`);
+	}
+
+	return await response.json();
+}
+
+export async function updateReceiptPaidBy(receiptId: number, paidBy: string | null) {
+	const response = await fetch(`${API_BASE}/receipts/${receiptId}`, {
+		method: 'PATCH',
+		headers: {
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({ paid_by: paidBy })
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text().catch(() => 'Unknown server error');
+		throw new Error(`HTTP ${response.status} (${response.statusText}): ${errorText}`);
+	}
+
+	return await response.json() as Receipt;
+}
+
+// Update receipt entry details (name, price, taxable)
+export async function updateReceiptEntryDetails(
+	entryId: number, 
+	data: { name?: string; price?: number; taxable?: boolean }
+) {
+	const response = await fetch(`${API_BASE}/receipt-entries/${entryId}`, {
+		method: 'PATCH',
+		headers: {
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify(data)
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text().catch(() => 'Unknown server error');
+		throw new Error(`HTTP ${response.status} (${response.statusText}): ${errorText}`);
+	}
+
+	return await response.json();
+}
+
+// Create new receipt entry
+export async function createReceiptEntry(
+	receiptId: number,
+	entryData: { name: string; price: number; taxable: boolean }
+) {
+	const response = await fetch(`${API_BASE}/receipts/${receiptId}/entries/`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify(entryData)
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text().catch(() => 'Unknown server error');
+		throw new Error(`HTTP ${response.status} (${response.statusText}): ${errorText}`);
+	}
+
+	return await response.json();
+}
+
+// Delete receipt entry
+export async function deleteReceiptEntry(entryId: number) {
+	const response = await fetch(`${API_BASE}/receipt-entries/${entryId}`, {
+		method: 'DELETE',
 	});
 
 	if (!response.ok) {

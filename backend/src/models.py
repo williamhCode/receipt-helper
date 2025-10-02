@@ -99,7 +99,7 @@ class Receipt(Base):
     # Store the raw receipt data/image
     raw_data: Mapped[str] = mapped_column(Text, nullable=True)
 
-    paid_by_id: Mapped[int] = mapped_column(
+    paid_by_id: Mapped[int | None] = mapped_column(
         ForeignKey("person_table.id"), nullable=True
     )
     paid_by_person: Mapped[Person] = relationship(

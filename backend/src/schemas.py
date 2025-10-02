@@ -86,6 +86,7 @@ class ReceiptResponse(ReceiptBase):
 class ReceiptUpdate(BaseModel):
     people: list[str] | None = None  # Accept list of names
     processed: bool | None = None
+    paid_by: str | None = None
 
 
 # receipt entry ---------------------------------------
@@ -100,7 +101,7 @@ class ReceiptEntryCreate(BaseModel):
     name: str
     price: float
     taxable: bool = True
-    assigned_to: list[str] = []  # Accept list of names, convert to Person objects
+    assigned_to: list[str] = []
 
 
 class ReceiptEntryResponse(ReceiptEntryBase):
@@ -112,7 +113,10 @@ class ReceiptEntryResponse(ReceiptEntryBase):
 
 
 class ReceiptEntryUpdate(BaseModel):
-    assigned_to: list[str]
+    assigned_to: list[str] | None = None
+    name: str | None = None
+    price: float | None = None
+    taxable: bool | None = None
 
 
 # build models

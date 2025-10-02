@@ -21,9 +21,11 @@ export class RealtimeReceiptManager {
     public onError: ((error: Event) => void) | null = null;
     public onMessage: ((message: WebSocketMessage) => void) | null = null;
 
-    constructor(groupId: number, baseUrl = 'ws://localhost:8000') {
+    constructor(groupId: number, baseUrl?: string) {
         this.groupId = groupId;
-        this.baseUrl = baseUrl;
+
+        const apiBaseUrl = import.meta.env.VITE_BACKEND_HOST || 'http://localhost:8000';
+        this.baseUrl = baseUrl || apiBaseUrl.replace(/^http/, 'ws');
     }
 
     async connect(): Promise<void> {

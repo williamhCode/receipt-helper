@@ -1,4 +1,4 @@
-<!-- src/routes/groups/[id]/+page.svelte -->
+<!-- Updated +page.svelte with editable paid_by, items, and add new items -->
 
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
@@ -9,6 +9,12 @@
 		createReceipt,
 		updateGroup,
 		updateReceipt,
+		updateReceiptPaidBy,
+		updateReceiptEntryDetails,
+		createReceiptEntry,
+		deleteReceiptEntry,
+		deleteReceipt,
+		deleteGroup,
 		handleError, 
 		calculateCombinedCosts, 
 		calculateReceiptCosts,
@@ -31,6 +37,10 @@
 	let error = $state('');
 	let showNewReceiptForm = $state(false);
 
+	// Editing state for inline editing
+	let editingEntry = $state<{ receiptId: number; entryId: number; field: 'name' | 'price' } | null>(null);
+	let editingValue = $state('');
+
 	// Derived state
 	const groupId = $derived(parseInt($page.params.id));
 
@@ -52,11 +62,10 @@
 		await refreshGroup();
 	}
 
-	// NEW: Handle group name updates
+	// Handle group name updates
 	function handleGroupNameUpdate(newName: string) {
 		if (group) {
 			group.name = newName;
-			// Trigger reactivity
 			group = group;
 		}
 	}
@@ -66,14 +75,12 @@
 		if (!group) return;
 		try {
 			await updateGroup(groupId, { people: newPeople });
-			// Don't update local state - WebSocket will trigger refreshGroup()
 		} catch (err) {
 			error = handleError(err, 'Failed to update group members');
 		}
 	}
 
 	async function handlePersonRenamed() {
-		// Just refresh - the WebSocket will have already triggered this anyway
 		await refreshGroup();
 	}
 
@@ -81,7 +88,6 @@
 		if (!group) return;
 		try {
 			await updateReceipt(receiptId, { people: newPeople });
-			// Don't update local state - WebSocket will trigger refreshGroup()
 		} catch (err) {
 			error = handleError(err, 'Failed to update receipt members');
 		}
@@ -92,7 +98,6 @@
 		try {
 			error = '';
 			await updateReceipt(receiptId, { processed: !currentStatus });
-			// Don't update local state - WebSocket will trigger refreshGroup()
 		} catch (err) {
 			error = handleError(err, 'Failed to update receipt status');
 		}
@@ -122,7 +127,6 @@
 			};
 
 			await createReceipt(groupId, receiptData);
-			// Don't update local state - WebSocket will trigger refreshGroup()
 		} catch (err) {
 			error = handleError(err, 'Failed to create receipt');
 		}
@@ -132,7 +136,6 @@
 	async function updateAssignment(receiptId: number, entryId: number, person: string, assigned: boolean) {
 		if (!group) return;
 
-		// Prevent multiple simultaneous updates to the same entry
 		if (updatingEntries.has(entryId)) {
 			return;
 		}
@@ -140,13 +143,11 @@
 		try {
 			updatingEntries.add(entryId);
 
-			// Find the receipt and entry to update
 			const receipt = group.receipts.find(r => r.id === receiptId);
 			if (!receipt) return;
 			const entry = receipt.entries.find(e => e.id === entryId);
 			if (!entry) return;
 
-			// Calculate new assignment list
 			let newAssignedTo = [...entry.assigned_to];
 			if (assigned && !newAssignedTo.includes(person)) {
 				newAssignedTo.push(person);
@@ -154,15 +155,12 @@
 				newAssignedTo = newAssignedTo.filter(p => p !== person);
 			}
 
-			// Update optimistically for immediate feedback
 			entry.assigned_to = newAssignedTo;
-			group = group; // Force reactivity
+			group = group;
 
-			// Update via API (this will trigger WebSocket refresh for others)
 			await realtimeStore.updateEntry(entryId, newAssignedTo);
 
 		} catch (err) {
-			// If backend update fails, refresh to get correct state
 			error = handleError(err, 'Failed to update assignment');
 			await refreshGroup();
 		} finally {
@@ -172,12 +170,10 @@
 
 	// Handle entry highlighting when others make changes
 	function highlightEntry(entryId: number) {
-		// Skip if this entry is currently being updated by this client
 		if (updatingEntries.has(entryId)) {
 			return;
 		}
 
-		// Visual feedback for the updated entry
 		setTimeout(() => {
 			const entryElement = document.querySelector(`[data-entry-id="${entryId}"]`);
 			if (entryElement) {
@@ -189,20 +185,113 @@
 		}, 100);
 	}
 
+	// NEW: Handle paid_by change directly
+	async function handlePaidByChange(receiptId: number, newValue: string) {
+		if (!group) return;
+		try {
+			const newPaidBy = newValue.trim() || null;
+			await updateReceiptPaidBy(receiptId, newPaidBy);
+		} catch (err) {
+			error = handleError(err, 'Failed to update paid by');
+		}
+	}
+
+	// NEW: Edit entry fields
+	function startEditEntry(receiptId: number, entryId: number, field: 'name' | 'price', currentValue: string | number) {
+		editingEntry = { receiptId, entryId, field };
+		editingValue = String(currentValue);
+	}
+
+	async function saveEntry() {
+		if (!editingEntry || !group) return;
+		try {
+			const { entryId, field } = editingEntry;
+			
+			if (field === 'name') {
+				await updateReceiptEntryDetails(entryId, { name: editingValue.trim() });
+			} else if (field === 'price') {
+				const price = parseFloat(editingValue);
+				if (isNaN(price) || price < 0) {
+					throw new Error('Invalid price');
+				}
+				await updateReceiptEntryDetails(entryId, { price });
+			}
+			
+			editingEntry = null;
+			editingValue = '';
+		} catch (err) {
+			error = handleError(err, 'Failed to update entry');
+		}
+	}
+
+	function cancelEditEntry() {
+		editingEntry = null;
+		editingValue = '';
+	}
+
+	// NEW: Toggle taxable
+	async function toggleTaxable(entryId: number, currentTaxable: boolean) {
+		try {
+			await updateReceiptEntryDetails(entryId, { taxable: !currentTaxable });
+		} catch (err) {
+			error = handleError(err, 'Failed to toggle taxable');
+		}
+	}
+
+	// NEW: Add new entry
+	async function addNewEntry(receiptId: number) {
+		try {
+			await createReceiptEntry(receiptId, {
+				name: 'New Item',
+				price: 0,
+				taxable: false
+			});
+		} catch (err) {
+			error = handleError(err, 'Failed to add new entry');
+		}
+	}
+
+	// NEW: Delete entry
+	async function removeEntry(entryId: number) {
+		if (!confirm('Delete this item?')) return;
+		try {
+			await deleteReceiptEntry(entryId);
+		} catch (err) {
+			error = handleError(err, 'Failed to delete entry');
+		}
+	}
+
+	// NEW: Delete receipt
+	async function removeReceipt(receiptId: number, receiptName: string) {
+		if (!confirm(`Delete receipt "${receiptName}"? This cannot be undone.`)) return;
+		try {
+			await deleteReceipt(receiptId);
+		} catch (err) {
+			error = handleError(err, 'Failed to delete receipt');
+		}
+	}
+
+	// NEW: Delete group
+	async function removeGroup() {
+		if (!group) return;
+		if (!confirm(`Delete group "${group.name}"? This will delete all receipts and cannot be undone.`)) return;
+		try {
+			await deleteGroup(groupId);
+			// Redirect to home page after successful deletion
+			goto('/');
+		} catch (err) {
+			error = handleError(err, 'Failed to delete group');
+		}
+	}
+
 	// Setup real-time connection
 	async function initializeRealtime() {
 		try {
-			// Set up the ONE universal callback
 			realtimeStore.onRefreshGroup = refreshGroup;
-			
-			// Set up entry highlighting
 			realtimeStore.onEntryHighlight = highlightEntry;
-			
-			// Connect to the group's WebSocket
 			await realtimeStore.connect(groupId);
 		} catch (err) {
 			console.error('Failed to initialize real-time connection:', err);
-			// Don't show error to user since app works without real-time
 		}
 	}
 
@@ -215,7 +304,31 @@
 	onDestroy(() => {
 		realtimeStore.disconnect();
 	});
+
+	// Handle keyboard events for inline editing
+	function handleKeydown(e: KeyboardEvent, saveFunc: () => void, cancelFunc: () => void) {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			saveFunc();
+		} else if (e.key === 'Escape') {
+			e.preventDefault();
+			cancelFunc();
+		}
+	}
 </script>
+
+<style>
+	/* Hide number input spinners */
+	input[type='number']::-webkit-inner-spin-button,
+	input[type='number']::-webkit-outer-spin-button {
+		-webkit-appearance: none;
+		margin: 0;
+	}
+	
+	input[type='number'] {
+		-moz-appearance: textfield;
+	}
+</style>
 
 <main class="container mx-auto p-6 bg-gray-50 min-h-screen">
 	<!-- Header -->
@@ -233,7 +346,6 @@
 			
 			{#if group}
 				<div class="group">
-					<!-- NEW: Replace static title with editable component -->
 					<EditableGroupName 
 						{groupId}
 						initialName={group.name}
@@ -241,7 +353,6 @@
 					/>
 				</div>
 				
-				<!-- Simple connection indicator -->
 				{#if realtimeStore.isConnected}
 					<span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full flex items-center space-x-1">
 						<div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
@@ -260,12 +371,23 @@
 			{/if}
 		</div>
 		
-		<button
-			onclick={() => showNewReceiptForm = true}
-			class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition-colors"
-		>
-			+ New Receipt
-		</button>
+		<div class="flex items-center gap-2">
+			<button
+				onclick={() => showNewReceiptForm = true}
+				class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition-colors"
+			>
+				+ New Receipt
+			</button>
+			{#if group}
+				<button
+					onclick={removeGroup}
+					class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 transition-colors"
+					title="Delete group"
+				>
+					🗑️ Delete Group
+				</button>
+			{/if}
+		</div>
 	</div>
 
 	<ErrorDisplay bind:error />
@@ -343,19 +465,28 @@
 										<h4 class="text-lg font-semibold text-gray-800">{receipt.name}</h4>
 										<p class="text-sm text-gray-500">{new Date(receipt.created_at).toLocaleDateString()}</p>
 									</div>
-									<button
-										onclick={() => handleToggleProcessed(receipt.id, receipt.processed)}
-										class="text-xs px-2 py-1 rounded-full cursor-pointer transition-all duration-200 hover:shadow-md"
-										class:bg-green-100={receipt.processed}
-										class:text-green-800={receipt.processed}
-										class:hover:bg-green-200={receipt.processed}
-										class:bg-yellow-100={!receipt.processed}
-										class:text-yellow-800={!receipt.processed}
-										class:hover:bg-yellow-200={!receipt.processed}
-										title={receipt.processed ? 'Click to mark as unprocessed' : 'Click to mark as processed'}
-									>
-										{receipt.processed ? 'Processed' : 'Pending'}
-									</button>
+									<div class="flex items-center gap-2">
+										<button
+											onclick={() => handleToggleProcessed(receipt.id, receipt.processed)}
+											class="text-xs px-2 py-1 rounded-full cursor-pointer transition-all duration-200 hover:shadow-md"
+											class:bg-green-100={receipt.processed}
+											class:text-green-800={receipt.processed}
+											class:hover:bg-green-200={receipt.processed}
+											class:bg-yellow-100={!receipt.processed}
+											class:text-yellow-800={!receipt.processed}
+											class:hover:bg-yellow-200={!receipt.processed}
+											title={receipt.processed ? 'Click to mark as unprocessed' : 'Click to mark as processed'}
+										>
+											{receipt.processed ? 'Processed' : 'Pending'}
+										</button>
+										<button
+											onclick={() => removeReceipt(receipt.id, receipt.name)}
+											class="text-xs px-2 py-1 rounded-full bg-red-100 text-red-800 hover:bg-red-200 cursor-pointer transition-all duration-200"
+											title="Delete receipt"
+										>
+											🗑️
+										</button>
+									</div>
 								</div>
 
 								<!-- Receipt Members Management -->
@@ -367,72 +498,145 @@
 									/>
 								</div>
 
-								<!-- Receipt Info -->
+								<!-- Receipt Info - PAID BY DROPDOWN (Always visible) -->
 								<div class="mb-4 space-y-2 text-sm">
-									{#if receipt.paid_by}
-										<p><span class="font-medium">Paid by:</span> 
-											<span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
-												{receipt.paid_by}
-											</span>
-										</p>
-									{:else}
-										<p><span class="font-medium">Paid by:</span> <span class="text-gray-500">Not specified</span></p>
-									{/if}
+									<div class="flex items-center gap-2">
+										<span class="font-medium">Paid by:</span>
+										<select 
+											value={receipt.paid_by || ""}
+											onchange={(e) => handlePaidByChange(receipt.id, e.currentTarget.value)}
+											class="text-xs px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+										>
+											<option value="">None</option>
+											{#each receipt.people as person}
+												<option value={person}>{person}</option>
+											{/each}
+										</select>
+									</div>
 								</div>
 
-								<!-- Items Table -->
-								{#if receipt.entries.length > 0}
-									<div class="mb-4">
-										<h5 class="font-medium text-gray-700 mb-2">Items</h5>
-										<div class="bg-white rounded border border-gray-200 overflow-hidden">
-											<table class="w-full text-xs">
-												<thead class="bg-gray-50">
-													<tr>
-														<th class="p-2 text-left font-medium text-gray-700 w-auto min-w-0">Item</th>
-														<th class="p-2 text-right font-medium text-gray-700 w-16">Price</th>
-														<th class="p-2 text-center font-medium text-gray-700 w-10">Tax</th>
-														{#each receipt.people as person}
-															<th class="p-2 text-center font-medium text-gray-700 w-10" title={person}>{getInitials(person)}</th>
-														{/each}
-													</tr>
-												</thead>
-												<tbody>
-													{#each receipt.entries as entry}
-														<tr 
-															class="border-t border-gray-100 hover:bg-gray-50 transition-colors duration-200"
-															data-entry-id={entry.id}
-														>
-															<td class="p-2 text-gray-800 text-xs pr-1" title={entry.name}>
-																<div>{entry.name}</div>
-															</td>
-															<td class="p-2 text-gray-800 font-mono text-xs text-right w-16">${entry.price.toFixed(2)}</td>
-															<td class="p-2 text-center w-10">
-																<span class="w-3 h-3 rounded-full inline-block" 
-																	  class:bg-green-500={entry.taxable}
-																	  class:bg-gray-300={!entry.taxable}
-																	  title={entry.taxable ? 'Taxable' : 'Not taxable'}>
-																</span>
-															</td>
-															{#each receipt.people as person}
-																<td class="p-2 text-center w-10">
-																	<input
-																		type="checkbox"
-																		checked={entry.assigned_to.includes(person)}
-																		disabled={updatingEntries.has(entry.id)}
-																		onchange={(e) => updateAssignment(receipt.id, entry.id, person, e.currentTarget.checked)}
-																		class="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-opacity"
-																		class:opacity-50={updatingEntries.has(entry.id)}
-																		title={updatingEntries.has(entry.id) ? 'Updating...' : 'Click to toggle assignment'}
-																	/>
-																</td>
-															{/each}
-														</tr>
+								<!-- Items Table - ALWAYS VISIBLE -->
+								<div class="mb-4">
+									<h5 class="font-medium text-gray-700 mb-2">Items</h5>
+									<div class="bg-white rounded border border-gray-200 overflow-hidden">
+										<table class="w-full text-xs">
+											<thead class="bg-gray-50">
+												<tr>
+													<th class="p-2 text-left font-medium text-gray-700 w-auto min-w-0">Item</th>
+													<th class="p-2 text-right font-medium text-gray-700 w-16">Price</th>
+													<th class="p-2 text-center font-medium text-gray-700 w-10">Tax</th>
+													{#each receipt.people as person}
+														<th class="p-2 text-center font-medium text-gray-700 w-10" title={person}>{getInitials(person)}</th>
 													{/each}
-												</tbody>
-											</table>
-										</div>
+													<th class="p-2 text-center font-medium text-gray-700 w-10">Del</th>
+												</tr>
+											</thead>
+											<tbody>
+												{#each receipt.entries as entry}
+													<tr 
+														class="border-t border-gray-100 hover:bg-gray-50 transition-colors duration-200"
+														data-entry-id={entry.id}
+													>
+														<!-- Editable Item Name -->
+														<td class="p-2 text-gray-800 text-xs pr-1" title={entry.name}>
+															{#if editingEntry?.entryId === entry.id && editingEntry?.field === 'name'}
+																<input
+																	type="text"
+																	bind:value={editingValue}
+																	onblur={saveEntry}
+																	onkeydown={(e) => handleKeydown(e, saveEntry, cancelEditEntry)}
+																	class="w-full px-1 py-0.5 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+																	autofocus
+																/>
+															{:else}
+																<button
+																	onclick={() => startEditEntry(receipt.id, entry.id, 'name', entry.name)}
+																	class="text-left w-full hover:bg-blue-50 px-1 py-0.5 rounded"
+																	title="Click to edit"
+																>
+																	{entry.name}
+																</button>
+															{/if}
+														</td>
+														
+														<!-- Editable Price -->
+														<td class="p-2 text-gray-800 font-mono text-xs text-right w-16">
+															{#if editingEntry?.entryId === entry.id && editingEntry?.field === 'price'}
+																<input
+																	type="number"
+																	step="0.01"
+																	bind:value={editingValue}
+																	onblur={saveEntry}
+																	onkeydown={(e) => handleKeydown(e, saveEntry, cancelEditEntry)}
+																	class="w-full px-1 py-0.5 border rounded text-right focus:outline-none focus:ring-1 focus:ring-blue-500"
+																	autofocus
+																/>
+															{:else}
+																<button
+																	onclick={() => startEditEntry(receipt.id, entry.id, 'price', entry.price)}
+																	class="w-full text-right hover:bg-blue-50 px-1 py-0.5 rounded"
+																	title="Click to edit"
+																>
+																	${entry.price.toFixed(2)}
+																</button>
+															{/if}
+														</td>
+														
+														<!-- Editable Tax (Click to toggle) -->
+														<td class="p-2 text-center w-10">
+															<button
+																onclick={() => toggleTaxable(entry.id, entry.taxable)}
+																class="w-3 h-3 rounded-full inline-block cursor-pointer hover:opacity-75"
+																class:bg-green-500={entry.taxable}
+																class:bg-gray-300={!entry.taxable}
+																title={entry.taxable ? 'Taxable (click to untax)' : 'Not taxable (click to tax)'}
+															>
+															</button>
+														</td>
+														
+														<!-- Assignment checkboxes -->
+														{#each receipt.people as person}
+															<td class="p-2 text-center w-10">
+																<input
+																	type="checkbox"
+																	checked={entry.assigned_to.includes(person)}
+																	disabled={updatingEntries.has(entry.id)}
+																	onchange={(e) => updateAssignment(receipt.id, entry.id, person, e.currentTarget.checked)}
+																	class="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-opacity"
+																	class:opacity-50={updatingEntries.has(entry.id)}
+																	title={updatingEntries.has(entry.id) ? 'Updating...' : 'Click to toggle assignment'}
+																/>
+															</td>
+														{/each}
+														
+														<!-- Delete button -->
+														<td class="p-2 text-center w-10">
+															<button
+																onclick={() => removeEntry(entry.id)}
+																class="text-red-500 hover:text-red-700 text-xs"
+																title="Delete item"
+															>
+																🗑️
+															</button>
+														</td>
+													</tr>
+												{/each}
+												
+												<!-- Add New Entry Row -->
+												<tr class="border-t border-gray-200 bg-gray-50">
+													<td colspan="100%" class="p-2 text-center">
+														<button
+															onclick={() => addNewEntry(receipt.id)}
+															class="text-xs text-blue-600 hover:text-blue-800 font-medium"
+														>
+															+ Add Item
+														</button>
+													</td>
+												</tr>
+											</tbody>
+										</table>
 									</div>
-								{/if}
+								</div>
 
 								<!-- Cost Breakdown -->
 								<div class="bg-gradient-to-br from-green-50 to-emerald-50 p-3 rounded-lg border border-green-200">
