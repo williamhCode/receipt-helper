@@ -1,5 +1,3 @@
-<!-- Updated +page.svelte with editable paid_by, items, and add new items -->
-
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
@@ -32,22 +30,23 @@
 	import ReceiptMembersManager from '$lib/components/ReceiptMembersManager.svelte';
 	import EditableGroupName from '$lib/components/EditableGroupName.svelte';
 
-	// State using runes
+	// ============================================================================
+	// State
+	// ============================================================================
+	
 	let group = $state<Group | null>(null);
 	let error = $state('');
 	let showNewReceiptForm = $state(false);
-
-	// Editing state for inline editing
 	let editingEntry = $state<{ receiptId: number; entryId: number; field: 'name' | 'price' } | null>(null);
 	let editingValue = $state('');
-
-	// Derived state
-	const groupId = $derived(parseInt($page.params.id));
-
-	// Track entries being updated to prevent conflicts
 	let updatingEntries = $state(new Set<number>());
 
-	// THE UNIVERSAL REFRESH FUNCTION - called for any update
+	const groupId = $derived(parseInt($page.params.id));
+
+	// ============================================================================
+	// Data fetching
+	// ============================================================================
+	
 	async function refreshGroup() {
 		try {
 			error = '';
@@ -57,12 +56,23 @@
 		}
 	}
 
-	// Initial load
-	async function loadGroup() {
-		await refreshGroup();
+	// ============================================================================
+	// API call wrappers (handle errors consistently)
+	// ============================================================================
+	
+	async function apiCall(fn: () => Promise<any>, errorMessage: string) {
+		try {
+			error = '';
+			await fn();
+		} catch (err) {
+			error = handleError(err, errorMessage);
+		}
 	}
 
-	// Handle group name updates
+	// ============================================================================
+	// Group handlers
+	// ============================================================================
+	
 	function handleGroupNameUpdate(newName: string) {
 		if (group) {
 			group.name = newName;
@@ -70,51 +80,60 @@
 		}
 	}
 
-	// All the handler functions now just do their API call and let WebSocket handle refresh
-	async function handleUpdateGroupMembers(newPeople: string[]) {
+	function handleUpdateGroupMembers(newPeople: string[]) {
 		if (!group) return;
-		try {
-			await updateGroup(groupId, { people: newPeople });
-		} catch (err) {
-			error = handleError(err, 'Failed to update group members');
-		}
+		return apiCall(
+			() => updateGroup(groupId, { people: newPeople }),
+			'Failed to update group members'
+		);
 	}
 
-	async function handlePersonRenamed() {
-		await refreshGroup();
+	function handlePersonRenamed() {
+		return refreshGroup();
 	}
 
-	async function handleUpdateReceiptMembers(receiptId: number, newPeople: string[]) {
+	function removeGroup() {
 		if (!group) return;
-		try {
-			await updateReceipt(receiptId, { people: newPeople });
-		} catch (err) {
-			error = handleError(err, 'Failed to update receipt members');
-		}
+		if (!confirm(`Delete group "${group.name}"? This will delete all receipts and cannot be undone.`)) return;
+		
+		apiCall(
+			async () => {
+				await deleteGroup(groupId);
+				goto('/');
+			},
+			'Failed to delete group'
+		);
 	}
 
-	async function handleToggleProcessed(receiptId: number, currentStatus: boolean) {
+	// ============================================================================
+	// Receipt handlers
+	// ============================================================================
+	
+	function handleUpdateReceiptMembers(receiptId: number, newPeople: string[]) {
 		if (!group) return;
-		try {
-			error = '';
-			await updateReceipt(receiptId, { processed: !currentStatus });
-		} catch (err) {
-			error = handleError(err, 'Failed to update receipt status');
-		}
+		return apiCall(
+			() => updateReceipt(receiptId, { people: newPeople }),
+			'Failed to update receipt members'
+		);
+	}
+
+	function handleToggleProcessed(receiptId: number, currentStatus: boolean) {
+		if (!group) return;
+		return apiCall(
+			() => updateReceipt(receiptId, { processed: !currentStatus }),
+			'Failed to update receipt status'
+		);
 	}
 
 	async function handleCreateReceipt(data: { name: string; paidBy: string; entries: string; people: string[] }) {
 		if (!group) return;
+		
 		try {
 			error = '';
-
+			
 			let entries = [];
 			if (data.entries.trim()) {
-				try {
-					entries = JSON.parse(data.entries);
-				} catch (e) {
-					throw new Error('Invalid JSON format for entries');
-				}
+				entries = JSON.parse(data.entries);
 			}
 
 			const receiptData = {
@@ -132,13 +151,29 @@
 		}
 	}
 
-	// Checkbox toggling with highlighting
-	async function updateAssignment(receiptId: number, entryId: number, person: string, assigned: boolean) {
+	function handlePaidByChange(receiptId: number, newValue: string) {
 		if (!group) return;
+		const newPaidBy = newValue.trim() || null;
+		return apiCall(
+			() => updateReceiptPaidBy(receiptId, newPaidBy),
+			'Failed to update paid by'
+		);
+	}
 
-		if (updatingEntries.has(entryId)) {
-			return;
-		}
+	function removeReceipt(receiptId: number, receiptName: string) {
+		if (!confirm(`Delete receipt "${receiptName}"? This cannot be undone.`)) return;
+		return apiCall(
+			() => deleteReceipt(receiptId),
+			'Failed to delete receipt'
+		);
+	}
+
+	// ============================================================================
+	// Entry handlers
+	// ============================================================================
+	
+	async function updateAssignment(receiptId: number, entryId: number, person: string, assigned: boolean) {
+		if (!group || updatingEntries.has(entryId)) return;
 
 		try {
 			updatingEntries.add(entryId);
@@ -159,7 +194,6 @@
 			group = group;
 
 			await realtimeStore.updateEntry(entryId, newAssignedTo);
-
 		} catch (err) {
 			error = handleError(err, 'Failed to update assignment');
 			await refreshGroup();
@@ -168,11 +202,8 @@
 		}
 	}
 
-	// Handle entry highlighting when others make changes
 	function highlightEntry(entryId: number) {
-		if (updatingEntries.has(entryId)) {
-			return;
-		}
+		if (updatingEntries.has(entryId)) return;
 
 		setTimeout(() => {
 			const entryElement = document.querySelector(`[data-entry-id="${entryId}"]`);
@@ -185,18 +216,6 @@
 		}, 100);
 	}
 
-	// NEW: Handle paid_by change directly
-	async function handlePaidByChange(receiptId: number, newValue: string) {
-		if (!group) return;
-		try {
-			const newPaidBy = newValue.trim() || null;
-			await updateReceiptPaidBy(receiptId, newPaidBy);
-		} catch (err) {
-			error = handleError(err, 'Failed to update paid by');
-		}
-	}
-
-	// NEW: Edit entry fields
 	function startEditEntry(receiptId: number, entryId: number, field: 'name' | 'price', currentValue: string | number) {
 		editingEntry = { receiptId, entryId, field };
 		editingValue = String(currentValue);
@@ -204,6 +223,7 @@
 
 	async function saveEntry() {
 		if (!editingEntry || !group) return;
+		
 		try {
 			const { entryId, field } = editingEntry;
 			
@@ -217,8 +237,7 @@
 				await updateReceiptEntryDetails(entryId, { price });
 			}
 			
-			editingEntry = null;
-			editingValue = '';
+			cancelEditEntry();
 		} catch (err) {
 			error = handleError(err, 'Failed to update entry');
 		}
@@ -229,62 +248,46 @@
 		editingValue = '';
 	}
 
-	// NEW: Toggle taxable
-	async function toggleTaxable(entryId: number, currentTaxable: boolean) {
-		try {
-			await updateReceiptEntryDetails(entryId, { taxable: !currentTaxable });
-		} catch (err) {
-			error = handleError(err, 'Failed to toggle taxable');
-		}
+	function toggleTaxable(entryId: number, currentTaxable: boolean) {
+		return apiCall(
+			() => updateReceiptEntryDetails(entryId, { taxable: !currentTaxable }),
+			'Failed to toggle taxable'
+		);
 	}
 
-	// NEW: Add new entry
-	async function addNewEntry(receiptId: number) {
-		try {
-			await createReceiptEntry(receiptId, {
-				name: 'New Item',
-				price: 0,
-				taxable: false
-			});
-		} catch (err) {
-			error = handleError(err, 'Failed to add new entry');
-		}
+	function addNewEntry(receiptId: number) {
+		return apiCall(
+			() => createReceiptEntry(receiptId, { name: 'New Item', price: 0, taxable: false }),
+			'Failed to add new entry'
+		);
 	}
 
-	// NEW: Delete entry
-	async function removeEntry(entryId: number) {
+	function removeEntry(entryId: number) {
 		if (!confirm('Delete this item?')) return;
-		try {
-			await deleteReceiptEntry(entryId);
-		} catch (err) {
-			error = handleError(err, 'Failed to delete entry');
+		return apiCall(
+			() => deleteReceiptEntry(entryId),
+			'Failed to delete entry'
+		);
+	}
+
+	// ============================================================================
+	// Utility functions
+	// ============================================================================
+	
+	function handleKeydown(e: KeyboardEvent, saveFunc: () => void, cancelFunc: () => void) {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			saveFunc();
+		} else if (e.key === 'Escape') {
+			e.preventDefault();
+			cancelFunc();
 		}
 	}
 
-	// NEW: Delete receipt
-	async function removeReceipt(receiptId: number, receiptName: string) {
-		if (!confirm(`Delete receipt "${receiptName}"? This cannot be undone.`)) return;
-		try {
-			await deleteReceipt(receiptId);
-		} catch (err) {
-			error = handleError(err, 'Failed to delete receipt');
-		}
-	}
-
-	// NEW: Delete group
-	async function removeGroup() {
-		if (!group) return;
-		if (!confirm(`Delete group "${group.name}"? This will delete all receipts and cannot be undone.`)) return;
-		try {
-			await deleteGroup(groupId);
-			// Redirect to home page after successful deletion
-			goto('/');
-		} catch (err) {
-			error = handleError(err, 'Failed to delete group');
-		}
-	}
-
-	// Setup real-time connection
+	// ============================================================================
+	// Lifecycle
+	// ============================================================================
+	
 	async function initializeRealtime() {
 		try {
 			realtimeStore.onRefreshGroup = refreshGroup;
@@ -295,30 +298,17 @@
 		}
 	}
 
-	// Lifecycle
 	onMount(async () => {
-		await loadGroup();
+		await refreshGroup();
 		await initializeRealtime();
 	});
 
 	onDestroy(() => {
 		realtimeStore.disconnect();
 	});
-
-	// Handle keyboard events for inline editing
-	function handleKeydown(e: KeyboardEvent, saveFunc: () => void, cancelFunc: () => void) {
-		if (e.key === 'Enter') {
-			e.preventDefault();
-			saveFunc();
-		} else if (e.key === 'Escape') {
-			e.preventDefault();
-			cancelFunc();
-		}
-	}
 </script>
 
 <style>
-	/* Hide number input spinners */
 	input[type='number']::-webkit-inner-spin-button,
 	input[type='number']::-webkit-outer-spin-button {
 		-webkit-appearance: none;
@@ -337,7 +327,7 @@
 			<button
 				onclick={() => goto('/')}
 				class="text-blue-600 hover:text-blue-800 flex items-center space-x-2"
-        aria-label="Go back to groups list"
+				aria-label="Go back to groups list"
 			>
 				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
@@ -345,13 +335,11 @@
 			</button>
 			
 			{#if group}
-				<div class="group">
-					<EditableGroupName 
-						{groupId}
-						initialName={group.name}
-						onNameUpdate={handleGroupNameUpdate}
-					/>
-				</div>
+				<EditableGroupName 
+					{groupId}
+					initialName={group.name}
+					onNameUpdate={handleGroupNameUpdate}
+				/>
 				
 				{#if realtimeStore.isConnected}
 					<span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full flex items-center space-x-1">
@@ -425,9 +413,9 @@
 									<span class="font-medium text-lg text-gray-700">{person}:</span>
 								</div>
 								<span class="font-mono font-semibold" 
-									  class:text-green-600={amount < 0} 
-									  class:text-red-600={amount > 0} 
-									  class:text-gray-800={amount === 0}>
+									class:text-green-600={amount < 0} 
+									class:text-red-600={amount > 0} 
+									class:text-gray-800={amount === 0}>
 									{amount < 0 ? '+' : ''}{Math.abs(amount).toFixed(2)}
 								</span>
 							</div>
@@ -458,7 +446,7 @@
 				<div class="p-6">
 					<div class="flex space-x-6 overflow-x-auto pb-4">
 						{#each group.receipts as receipt}
-							<div class="flex-shrink-0 w-[700px] bg-gray-50 border border-gray-200 rounded-lg p-4 transition-colors duration-200" style="scroll-snap-align: start;">
+							<div class="flex-shrink-0 w-[700px] bg-gray-50 border border-gray-200 rounded-lg p-4" style="scroll-snap-align: start;">
 								<!-- Receipt Header -->
 								<div class="flex justify-between items-start mb-4">
 									<div>
@@ -468,20 +456,20 @@
 									<div class="flex items-center gap-2">
 										<button
 											onclick={() => handleToggleProcessed(receipt.id, receipt.processed)}
-											class="text-xs px-2 py-1 rounded-full cursor-pointer transition-all duration-200 hover:shadow-md"
+											class="text-xs px-2 py-1 rounded-full cursor-pointer transition-all hover:shadow-md"
 											class:bg-green-100={receipt.processed}
 											class:text-green-800={receipt.processed}
 											class:hover:bg-green-200={receipt.processed}
 											class:bg-yellow-100={!receipt.processed}
 											class:text-yellow-800={!receipt.processed}
 											class:hover:bg-yellow-200={!receipt.processed}
-											title={receipt.processed ? 'Click to mark as unprocessed' : 'Click to mark as processed'}
+											title={receipt.processed ? 'Mark as unprocessed' : 'Mark as processed'}
 										>
 											{receipt.processed ? 'Processed' : 'Pending'}
 										</button>
 										<button
 											onclick={() => removeReceipt(receipt.id, receipt.name)}
-											class="text-xs px-2 py-1 rounded-full bg-red-100 text-red-800 hover:bg-red-200 cursor-pointer transition-all duration-200"
+											class="text-xs px-2 py-1 rounded-full bg-red-100 text-red-800 hover:bg-red-200 cursor-pointer transition-all"
 											title="Delete receipt"
 										>
 											🗑️
@@ -489,7 +477,7 @@
 									</div>
 								</div>
 
-								<!-- Receipt Members Management -->
+								<!-- Receipt Members -->
 								<div class="mb-4">
 									<ReceiptMembersManager 
 										bind:receiptPeople={receipt.people}
@@ -498,9 +486,9 @@
 									/>
 								</div>
 
-								<!-- Receipt Info - PAID BY DROPDOWN (Always visible) -->
-								<div class="mb-4 space-y-2 text-sm">
-									<div class="flex items-center gap-2">
+								<!-- Paid By -->
+								<div class="mb-4">
+									<div class="flex items-center gap-2 text-sm">
 										<span class="font-medium">Paid by:</span>
 										<select 
 											value={receipt.paid_by || ""}
@@ -515,14 +503,14 @@
 									</div>
 								</div>
 
-								<!-- Items Table - ALWAYS VISIBLE -->
+								<!-- Items Table -->
 								<div class="mb-4">
 									<h5 class="font-medium text-gray-700 mb-2">Items</h5>
 									<div class="bg-white rounded border border-gray-200 overflow-hidden">
 										<table class="w-full text-xs">
 											<thead class="bg-gray-50">
 												<tr>
-													<th class="p-2 text-left font-medium text-gray-700 w-auto min-w-0">Item</th>
+													<th class="p-2 text-left font-medium text-gray-700">Item</th>
 													<th class="p-2 text-right font-medium text-gray-700 w-16">Price</th>
 													<th class="p-2 text-center font-medium text-gray-700 w-10">Tax</th>
 													{#each receipt.people as person}
@@ -534,11 +522,11 @@
 											<tbody>
 												{#each receipt.entries as entry}
 													<tr 
-														class="border-t border-gray-100 hover:bg-gray-50 transition-colors duration-200"
+														class="border-t border-gray-100 hover:bg-gray-50 transition-colors"
 														data-entry-id={entry.id}
 													>
 														<!-- Editable Item Name -->
-														<td class="p-2 text-gray-800 text-xs pr-1" title={entry.name}>
+														<td class="p-2 text-gray-800 text-xs" title={entry.name}>
 															{#if editingEntry?.entryId === entry.id && editingEntry?.field === 'name'}
 																<input
 																	type="text"
@@ -582,19 +570,18 @@
 															{/if}
 														</td>
 														
-														<!-- Editable Tax (Click to toggle) -->
+														<!-- Tax Toggle -->
 														<td class="p-2 text-center w-10">
 															<button
 																onclick={() => toggleTaxable(entry.id, entry.taxable)}
 																class="w-3 h-3 rounded-full inline-block cursor-pointer hover:opacity-75"
 																class:bg-green-500={entry.taxable}
 																class:bg-gray-300={!entry.taxable}
-																title={entry.taxable ? 'Taxable (click to untax)' : 'Not taxable (click to tax)'}
-															>
-															</button>
+																title={entry.taxable ? 'Taxable' : 'Not taxable'}
+															/>
 														</td>
 														
-														<!-- Assignment checkboxes -->
+														<!-- Assignment Checkboxes -->
 														{#each receipt.people as person}
 															<td class="p-2 text-center w-10">
 																<input
@@ -602,14 +589,14 @@
 																	checked={entry.assigned_to.includes(person)}
 																	disabled={updatingEntries.has(entry.id)}
 																	onchange={(e) => updateAssignment(receipt.id, entry.id, person, e.currentTarget.checked)}
-																	class="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500 transition-opacity"
+																	class="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
 																	class:opacity-50={updatingEntries.has(entry.id)}
-																	title={updatingEntries.has(entry.id) ? 'Updating...' : 'Click to toggle assignment'}
+																	title={updatingEntries.has(entry.id) ? 'Updating...' : person}
 																/>
 															</td>
 														{/each}
 														
-														<!-- Delete button -->
+														<!-- Delete Button -->
 														<td class="p-2 text-center w-10">
 															<button
 																onclick={() => removeEntry(entry.id)}
@@ -690,7 +677,6 @@
 		</div>
 	{/if}
 
-	<!-- New Receipt Modal -->
 	<NewReceiptModal 
 		bind:show={showNewReceiptForm} 
 		{group} 

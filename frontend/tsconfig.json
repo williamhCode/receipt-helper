@@ -1,5 +1,10 @@
 {
 	"compilerOptions": {
+    "extends": "./.svelte-kit/tsconfig.json",
+    "paths": {
+      "$lib/*": ["src/lib/*"]
+    },
+    "skipLibCheck": true,
 		"allowJs": true,
 		"checkJs": true,
     "target": "esnext",
