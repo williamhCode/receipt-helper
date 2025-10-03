@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,11 +13,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from .models import Base, Group, Receipt, ReceiptEntry, Person
 from .schemas import (
     GroupCreate,
-    GroupResponse,
     GroupUpdate,
-    GroupNameUpdate,  # NEW: Import the new schema
+    GroupNameUpdate,
     ReceiptCreate,
-    ReceiptResponse,
     ReceiptUpdate,
     PersonCreate,
     PersonResponse,
@@ -26,16 +24,16 @@ from .schemas import (
     ReceiptEntryUpdate,
 )
 
-# Import the connection manager
 from .websocket_manager import connection_manager
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# fastapi app -------------------------------------------------
-app = FastAPI(title="Receipt Helper", version="0.0.1")
+# FastAPI app
+app = FastAPI(title="Receipt Helper", version="0.1.0")
 
+# CORS
 allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 app.add_middleware(
     CORSMiddleware,
@@ -45,14 +43,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# database setup -----------------------------------------------
-db_url = os.getenv(
-    "DATABASE_URL", "postgresql://williamhou@localhost:5432/receipt_helper"
-)
-engine = create_engine(db_url, pool_pre_ping=True)
-# Base.metadata.create_all(bind=engine)
+# Database setup
+db_url = os.getenv("DATABASE_URL", "postgresql+psycopg2:///receipt_helper")
 
-# dependency --------------------------------------------------
+# Fix Railway's postgres:// to postgresql+psycopg2://
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql+psycopg2://", 1)
+
+engine = create_engine(db_url, pool_pre_ping=True)
+
+
+# Dependency
 def get_session():
     with Session(engine) as session:
         yield session
@@ -61,14 +62,17 @@ def get_session():
 SessionDep = Annotated[Session, Depends(get_session)]
 
 
-# Helper functions ---------------------------------------------
+# ============================================================================
+# Helper functions
+# ============================================================================
+
 def get_or_create_person(db: Session, name: str) -> Person:
     """Get existing person by name or create a new one"""
     person = db.query(Person).filter(Person.name == name).first()
     if not person:
         person = Person(name=name)
         db.add(person)
-        db.flush()  # Flush to get the ID without committing
+        db.flush()
     return person
 
 
@@ -78,42 +82,44 @@ def get_persons_from_names(db: Session, names: list[str]) -> list[Person]:
 
 
 def persons_to_names(persons: list[Person]) -> list[str]:
-    """Convert list of Person objects to list of names for frontend compatibility"""
+    """Convert list of Person objects to list of names"""
     return [person.name for person in persons]
 
 
-# SIMPLIFIED: Just broadcast "refresh_group" to all clients in a group
 async def broadcast_group_update(group_id: int, action: str = "update"):
-    """Simple function to tell all clients in a group to refresh"""
+    """Broadcast refresh message to all clients in a group"""
     await connection_manager.broadcast_to_group(
         group_id,
         {
             "type": "refresh_group",
             "group_id": group_id,
             "action": action,
-            "timestamp": datetime.now().isoformat(),  # Convert to string!
+            "timestamp": datetime.now().isoformat(),
         },
     )
 
 
-# Response model conversion functions (FIXED datetime serialization)
+# ============================================================================
+# Response conversion functions
+# ============================================================================
+
 def group_to_response(group: Group) -> dict:
-    """Convert Group model to response format with string names"""
+    """Convert Group model to response format"""
     return {
         "id": group.id,
-        "created_at": group.created_at.isoformat(),  # Convert to string
+        "created_at": group.created_at.isoformat(),
         "slug": group.slug,
-        "name": group.name,  # NEW: Include the name field
+        "name": group.name,
         "people": persons_to_names(group.people),
         "receipts": [receipt_to_response(receipt) for receipt in group.receipts],
     }
 
 
 def receipt_to_response(receipt: Receipt) -> dict:
-    """Convert Receipt model to response format with string names"""
+    """Convert Receipt model to response format"""
     return {
         "id": receipt.id,
-        "created_at": receipt.created_at.isoformat(),  # Convert to string
+        "created_at": receipt.created_at.isoformat(),
         "processed": receipt.processed,
         "name": receipt.name,
         "raw_data": receipt.raw_data,
@@ -125,7 +131,7 @@ def receipt_to_response(receipt: Receipt) -> dict:
 
 
 def entry_to_response(entry: ReceiptEntry) -> dict:
-    """Convert ReceiptEntry model to response format with string names"""
+    """Convert ReceiptEntry model to response format"""
     return {
         "id": entry.id,
         "name": entry.name,
@@ -136,11 +142,13 @@ def entry_to_response(entry: ReceiptEntry) -> dict:
     }
 
 
-# WebSocket endpoints ------------------------------------------
+# ============================================================================
+# WebSocket endpoints
+# ============================================================================
+
 @app.websocket("/ws/groups/{group_id}")
 async def websocket_endpoint(websocket: WebSocket, group_id: int):
     """WebSocket endpoint for real-time updates within a group"""
-
     # Verify group exists
     with Session(engine) as db:
         group = db.query(Group).filter(Group.id == group_id).first()
@@ -187,23 +195,29 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int):
         await connection_manager.disconnect(websocket)
 
 
-# Regular endpoints ---------------------------------------------------
+# ============================================================================
+# API endpoints
+# ============================================================================
 
-
-# Root endpoint
 @app.get("/")
 def root():
-    return {"message": "Receipt Helper API"}
+    """Health check endpoint"""
+    return {"message": "Receipt Helper API", "version": "0.1.0"}
 
 
+# ============================================================================
 # Person endpoints
+# ============================================================================
+
 @app.get("/people/", response_model=list[PersonResponse])
 def list_people(db: SessionDep):
+    """Get all people"""
     return db.query(Person).all()
 
 
 @app.post("/people/", response_model=PersonResponse)
 async def create_person(person: PersonCreate, db: SessionDep):
+    """Create a new person"""
     existing = db.query(Person).filter(Person.name == person.name).first()
     if existing:
         raise HTTPException(
@@ -215,7 +229,7 @@ async def create_person(person: PersonCreate, db: SessionDep):
     db.commit()
     db.refresh(db_person)
 
-    # Broadcast to all groups that might be affected
+    # Broadcast to all groups
     for group_id in list(connection_manager.group_connections.keys()):
         await broadcast_group_update(group_id, "person_created")
 
@@ -224,6 +238,7 @@ async def create_person(person: PersonCreate, db: SessionDep):
 
 @app.patch("/people/{person_id}", response_model=PersonResponse)
 async def update_person(person_id: int, person_update: PersonUpdate, db: SessionDep):
+    """Update a person's name"""
     person = db.query(Person).filter(Person.id == person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
@@ -242,7 +257,7 @@ async def update_person(person_id: int, person_update: PersonUpdate, db: Session
     db.commit()
     db.refresh(person)
 
-    # Find all groups that include this person and broadcast
+    # Broadcast to all affected groups
     groups_with_person = (
         db.query(Group).filter(Group.people.any(Person.id == person_id)).all()
     )
@@ -254,6 +269,7 @@ async def update_person(person_id: int, person_update: PersonUpdate, db: Session
 
 @app.delete("/people/{person_id}")
 async def delete_person(person_id: int, db: SessionDep):
+    """Delete a person"""
     person = db.query(Person).filter(Person.id == person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
@@ -279,26 +295,102 @@ async def delete_person(person_id: int, db: SessionDep):
     return {"message": "Person deleted successfully"}
 
 
+# ============================================================================
 # Group endpoints
+# ============================================================================
+
+@app.get("/groups/")
+def list_groups(db: SessionDep):
+    """Get all groups (without full details)"""
+    groups = db.query(Group).all()
+    return [group_to_response(group) for group in groups]
+
+
 @app.post("/groups/")
 async def create_group(group: GroupCreate, db: SessionDep):
+    """Create a new group"""
     people = get_persons_from_names(db, group.people)
 
     db_group = Group(
         people=people,
         key_hash="placeholder_hash",
-        name="",  # Temporary empty name - will be set after commit to get ID
+        name="",
     )
     db.add(db_group)
     db.commit()
     db.refresh(db_group)
 
-    # NEW: Set the default name to "Group #{id}" after getting the ID
+    # Set default name based on ID
     db_group.name = f"Group {db_group.id}"
     db.commit()
     db.refresh(db_group)
 
     return group_to_response(db_group)
+
+
+@app.get("/groups/{group_id}")
+def get_group(group_id: int, db: SessionDep):
+    """Get a single group with all details - OPTIMIZED with eager loading"""
+    group = (
+        db.query(Group)
+        .filter(Group.id == group_id)
+        .options(
+            joinedload(Group.people),
+            joinedload(Group.receipts)
+            .joinedload(Receipt.people),
+            joinedload(Group.receipts)
+            .joinedload(Receipt.paid_by_person),
+            joinedload(Group.receipts)
+            .joinedload(Receipt.entries)
+            .joinedload(ReceiptEntry.assigned_to_people),
+        )
+        .first()
+    )
+    
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    return group_to_response(group)
+
+
+@app.patch("/groups/{group_id}")
+async def update_group(group_id: int, group_update: GroupUpdate, db: SessionDep):
+    """Update group members"""
+    group = db.query(Group).filter(Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    if group_update.people is not None:
+        people = get_persons_from_names(db, group_update.people)
+        group.people = people
+
+    if group_update.name is not None:
+        group.name = group_update.name
+
+    db.commit()
+    db.refresh(group)
+
+    await broadcast_group_update(group_id, "group_updated")
+
+    return group_to_response(group)
+
+
+@app.patch("/groups/{group_id}/name")
+async def update_group_name(
+    group_id: int, name_update: GroupNameUpdate, db: SessionDep
+):
+    """Update only the group name"""
+    group = db.query(Group).filter(Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    group.name = name_update.name
+    db.commit()
+    db.refresh(group)
+
+    await broadcast_group_update(group_id, "group_name_updated")
+
+    return group_to_response(group)
 
 
 @app.delete("/groups/{group_id}")
@@ -308,85 +400,27 @@ async def delete_group(group_id: int, db: SessionDep):
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
     
-    # Delete the group (receipts and entries will be cascade deleted if set up in models)
     db.delete(group)
     db.commit()
     
-    # Broadcast deletion to any connected clients before they're disconnected
     await broadcast_group_update(group_id, "group_deleted")
     
     return {"message": "Group deleted successfully", "id": group_id}
 
 
-@app.get("/groups/")
-def list_groups(db: SessionDep):
-    groups = db.query(Group).all()
-    return [group_to_response(group) for group in groups]
-
-
-@app.get("/groups/{group_id}")
-def get_group(group_id: int, db: SessionDep):
-    group = db.query(Group).filter(Group.id == group_id).first()
-    if not group:
-        raise HTTPException(status_code=404, detail="Group not found")
-    return group_to_response(group)
-
-
-@app.patch("/groups/{group_id}")
-async def update_group(group_id: int, group_update: GroupUpdate, db: SessionDep):
-    group = db.query(Group).filter(Group.id == group_id).first()
-    if not group:
-        raise HTTPException(status_code=404, detail="Group not found")
-
-    # NEW: Handle name updates
-    if group_update.name is not None:
-        group.name = group_update.name
-
-    if group_update.people is not None:
-        people = get_persons_from_names(db, group_update.people)
-        group.people = people
-
-    db.commit()
-    db.refresh(group)
-
-    # Broadcast update
-    await broadcast_group_update(group_id, "group_updated")
-
-    return group_to_response(group)
-
-
-# NEW: Dedicated endpoint for updating just the group name
-@app.patch("/groups/{group_id}/name")
-async def update_group_name(
-    group_id: int, name_update: GroupNameUpdate, db: SessionDep
-):
-    """Update only the group name - useful for inline editing"""
-    group = db.query(Group).filter(Group.id == group_id).first()
-    if not group:
-        raise HTTPException(status_code=404, detail="Group not found")
-
-    group.name = name_update.name
-    db.commit()
-    db.refresh(group)
-
-    # Broadcast name update specifically
-    await broadcast_group_update(group_id, "group_name_updated")
-
-    return group_to_response(group)
-
-
+# ============================================================================
 # Receipt endpoints
+# ============================================================================
+
 @app.post("/groups/{group_id}/receipts/")
 async def create_receipt(group_id: int, receipt: ReceiptCreate, db: SessionDep):
+    """Create a new receipt"""
     group = db.query(Group).filter(Group.id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
     people = get_persons_from_names(db, receipt.people)
-
-    paid_by_person = None
-    if receipt.paid_by:
-        paid_by_person = get_or_create_person(db, receipt.paid_by)
+    paid_by_person = get_or_create_person(db, receipt.paid_by) if receipt.paid_by else None
 
     db_receipt = Receipt(
         group_id=group_id,
@@ -399,6 +433,7 @@ async def create_receipt(group_id: int, receipt: ReceiptCreate, db: SessionDep):
     db.add(db_receipt)
     db.flush()
 
+    # Create entries
     for entry_data in receipt.entries:
         assigned_people = get_persons_from_names(db, entry_data.assigned_to)
         db_entry = ReceiptEntry(
@@ -413,43 +448,16 @@ async def create_receipt(group_id: int, receipt: ReceiptCreate, db: SessionDep):
     db.commit()
     db.refresh(db_receipt)
 
-    # Broadcast update
     await broadcast_group_update(group_id, "receipt_created")
 
     return receipt_to_response(db_receipt)
 
-# NEW: Delete a receipt
-@app.delete("/receipts/{receipt_id}")
-async def delete_receipt(receipt_id: int, db: SessionDep):
-    """Delete a receipt and all its entries"""
-    receipt = db.query(Receipt).filter(Receipt.id == receipt_id).first()
-    if not receipt:
-        raise HTTPException(status_code=404, detail="Receipt not found")
-    
-    group_id = receipt.group_id
-    
-    # Delete the receipt (entries will be cascade deleted if set up in models)
-    db.delete(receipt)
-    db.commit()
-    
-    # Broadcast update
-    await broadcast_group_update(group_id, "receipt_deleted")
-    
-    return {"message": "Receipt deleted successfully", "id": receipt_id}
 
-@app.get("/receipts/{receipt_id}")
-def get_receipt(receipt_id: int, db: SessionDep):
-    receipt = db.query(Receipt).filter(Receipt.id == receipt_id).first()
-    if not receipt:
-        raise HTTPException(status_code=404, detail="Receipt not found")
-    return receipt_to_response(receipt)
-
-
-# UPDATE: Modify the existing update_receipt endpoint to handle paid_by
 @app.patch("/receipts/{receipt_id}")
 async def update_receipt(
     receipt_id: int, receipt_update: ReceiptUpdate, db: SessionDep
 ):
+    """Update receipt details"""
     receipt = db.query(Receipt).filter(Receipt.id == receipt_id).first()
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
@@ -472,76 +480,41 @@ async def update_receipt(
     db.commit()
     db.refresh(receipt)
 
-    # Broadcast update
     await broadcast_group_update(group_id, "receipt_updated")
 
     return receipt_to_response(receipt)
 
 
-# UPDATE: Modify the existing update_receipt_entry endpoint to handle all fields
-@app.patch("/receipt-entries/{entry_id}")
-async def update_receipt_entry(
-    entry_id: int, update_data: ReceiptEntryUpdate, db: SessionDep
-):
-    """Update a receipt entry and broadcast changes to all group members"""
-    entry = db.query(ReceiptEntry).filter(ReceiptEntry.id == entry_id).first()
-    if not entry:
-        raise HTTPException(status_code=404, detail="Receipt entry not found")
-
-    group_id = entry.receipt.group_id
-
-    # Update assigned_to if provided
-    if update_data.assigned_to is not None:
-        assigned_people = get_persons_from_names(db, update_data.assigned_to)
-        entry.assigned_to_people = assigned_people
-
-    # NEW: Update name if provided
-    if update_data.name is not None:
-        entry.name = update_data.name
-
-    # NEW: Update price if provided
-    if update_data.price is not None:
-        if update_data.price < 0:
-            raise HTTPException(status_code=400, detail="Price must be non-negative")
-        entry.price = update_data.price
-
-    # NEW: Update taxable if provided
-    if update_data.taxable is not None:
-        entry.taxable = update_data.taxable
-
+@app.delete("/receipts/{receipt_id}")
+async def delete_receipt(receipt_id: int, db: SessionDep):
+    """Delete a receipt and all its entries"""
+    receipt = db.query(Receipt).filter(Receipt.id == receipt_id).first()
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+    
+    group_id = receipt.group_id
+    
+    db.delete(receipt)
     db.commit()
-    db.refresh(entry)
-
-    entry_response = entry_to_response(entry)
-
-    # Broadcast the update
-    await connection_manager.broadcast_to_group(
-        group_id,
-        {
-            "type": "entry_updated",
-            "entry_id": entry_id,
-            "entry": entry_response,
-            "group_id": group_id,
-            "timestamp": datetime.now().isoformat(),
-        },
-    )
-
-    return entry_response
+    
+    await broadcast_group_update(group_id, "receipt_deleted")
+    
+    return {"message": "Receipt deleted successfully", "id": receipt_id}
 
 
-# NEW: Create a new receipt entry
+# ============================================================================
+# Receipt Entry endpoints
+# ============================================================================
+
 @app.post("/receipts/{receipt_id}/entries/")
 async def create_receipt_entry(
     receipt_id: int, entry_data: ReceiptEntryCreate, db: SessionDep
 ):
-    """Create a new entry for an existing receipt"""
+    """Create a new entry for a receipt"""
     receipt = db.query(Receipt).filter(Receipt.id == receipt_id).first()
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
 
-    group_id = receipt.group_id
-
-    # Create new entry with no assignments by default
     db_entry = ReceiptEntry(
         receipt_id=receipt_id,
         name=entry_data.name,
@@ -553,10 +526,51 @@ async def create_receipt_entry(
     db.commit()
     db.refresh(db_entry)
 
-    # Broadcast update
-    await broadcast_group_update(group_id, "entry_created")
+    await broadcast_group_update(receipt.group_id, "entry_created")
 
     return entry_to_response(db_entry)
+
+
+@app.patch("/receipt-entries/{entry_id}")
+async def update_receipt_entry(
+    entry_id: int, update_data: ReceiptEntryUpdate, db: SessionDep
+):
+    """Update a receipt entry"""
+    entry = db.query(ReceiptEntry).filter(ReceiptEntry.id == entry_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Receipt entry not found")
+
+    if update_data.assigned_to is not None:
+        assigned_people = get_persons_from_names(db, update_data.assigned_to)
+        entry.assigned_to_people = assigned_people
+
+    if update_data.name is not None:
+        entry.name = update_data.name
+
+    if update_data.price is not None:
+        if update_data.price < 0:
+            raise HTTPException(status_code=400, detail="Price must be non-negative")
+        entry.price = update_data.price
+
+    if update_data.taxable is not None:
+        entry.taxable = update_data.taxable
+
+    db.commit()
+    db.refresh(entry)
+
+    # Broadcast granular update
+    await connection_manager.broadcast_to_group(
+        entry.receipt.group_id,
+        {
+            "type": "entry_updated",
+            "entry_id": entry_id,
+            "entry": entry_to_response(entry),
+            "group_id": entry.receipt.group_id,
+            "timestamp": datetime.now().isoformat(),
+        },
+    )
+
+    return entry_to_response(entry)
 
 
 @app.delete("/receipt-entries/{entry_id}")
@@ -571,138 +585,6 @@ async def delete_receipt_entry(entry_id: int, db: SessionDep):
     db.delete(entry)
     db.commit()
 
-    # Broadcast update
     await broadcast_group_update(group_id, "entry_deleted")
 
     return {"message": "Entry deleted successfully", "id": entry_id}
-
-
-@app.get("/groups/{group_id}/receipts/")
-def list_group_receipts(group_id: int, db: SessionDep):
-    receipts = db.query(Receipt).filter(Receipt.group_id == group_id).all()
-    return [receipt_to_response(receipt) for receipt in receipts]
-
-
-# WebSocket status endpoint
-@app.get("/groups/{group_id}/connections")
-def get_group_connections(group_id: int):
-    """Get the number of active WebSocket connections for a group"""
-    count = connection_manager.get_group_connection_count(group_id)
-    return {"group_id": group_id, "active_connections": count}
-
-
-# Sample data endpoint
-@app.post("/create-sample-data")
-async def create_sample_data(db: SessionDep):
-    william = get_or_create_person(db, "William")
-    hao = get_or_create_person(db, "Hao")
-    howard = get_or_create_person(db, "Howard")
-
-    group = Group(
-        people=[william, hao, howard],
-        key_hash="sample_hash",
-        name="",  # Temporary empty name
-    )
-    db.add(group)
-    db.commit()
-    db.refresh(group)
-
-    # Set the default name pattern
-    group.name = f"Group #{group.id}"
-    db.commit()
-    db.refresh(group)
-
-    sample_receipts = [
-        {
-            "name": "Whole Foods Market",
-            "raw_data": "Grocery shopping receipt with organic produce",
-            "paid_by": william,
-        },
-        {
-            "name": "Starbucks Coffee",
-            "raw_data": "Coffee and pastries for the team",
-            "paid_by": hao,
-        },
-        {
-            "name": "Pizza Palace",
-            "raw_data": "Team lunch - large pepperoni pizza",
-            "paid_by": howard,
-        },
-    ]
-
-    receipts_created = []
-    for receipt_data in sample_receipts:
-        receipt = Receipt(
-            group_id=group.id,
-            processed=False,
-            name=receipt_data["name"],
-            raw_data=receipt_data["raw_data"],
-            paid_by_person=receipt_data["paid_by"],
-            people=[william, hao, howard],
-        )
-        db.add(receipt)
-        db.flush()
-        receipts_created.append(receipt)
-
-        if receipt_data["name"] == "Whole Foods Market":
-            sample_items = [
-                ("Organic Apples", 5.99, True),
-                ("Bananas", 3.50, True),
-                ("Sourdough Bread", 4.99, False),
-                ("Almond Milk", 4.25, False),
-            ]
-
-            for name, price, taxable in sample_items:
-                entry = ReceiptEntry(
-                    receipt_id=receipt.id,
-                    name=name,
-                    price=price,
-                    taxable=taxable,
-                    assigned_to_people=[],
-                )
-                db.add(entry)
-
-        elif receipt_data["name"] == "Starbucks Coffee":
-            starbucks_items = [
-                ("Large Latte", 5.45, True),
-                ("Cappuccino", 4.95, True),
-                ("Blueberry Muffin", 3.25, True),
-            ]
-
-            for name, price, taxable in starbucks_items:
-                entry = ReceiptEntry(
-                    receipt_id=receipt.id,
-                    name=name,
-                    price=price,
-                    taxable=taxable,
-                    assigned_to_people=[],
-                )
-                db.add(entry)
-
-        elif receipt_data["name"] == "Pizza Palace":
-            pizza_items = [
-                ("Large Pepperoni Pizza", 18.99, True),
-                ("Garlic Bread", 6.99, True),
-                ("2L Coca Cola", 3.99, True),
-            ]
-
-            for name, price, taxable in pizza_items:
-                entry = ReceiptEntry(
-                    receipt_id=receipt.id,
-                    name=name,
-                    price=price,
-                    taxable=taxable,
-                    assigned_to_people=[],
-                )
-                db.add(entry)
-
-    db.commit()
-
-    # Broadcast sample data creation
-    await broadcast_group_update(group.id, "sample_data_created")
-
-    return {
-        "message": "Sample data created with Person objects",
-        "group_id": group.id,
-        "receipts_created": len(receipts_created),
-    }
