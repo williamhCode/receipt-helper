@@ -330,22 +330,8 @@ async def create_group(group: GroupCreate, db: SessionDep):
 
 @app.get("/groups/{group_id}")
 def get_group(group_id: int, db: SessionDep):
-    """Get a single group with all details - OPTIMIZED with eager loading"""
-    group = (
-        db.query(Group)
-        .filter(Group.id == group_id)
-        .options(
-            joinedload(Group.people),
-            joinedload(Group.receipts)
-            .joinedload(Receipt.people),
-            joinedload(Group.receipts)
-            .joinedload(Receipt.paid_by_person),
-            joinedload(Group.receipts)
-            .joinedload(Receipt.entries)
-            .joinedload(ReceiptEntry.assigned_to_people),
-        )
-        .first()
-    )
+    """Get a single group with all details"""
+    group = db.query(Group).filter(Group.id == group_id).first()
     
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
