@@ -8,13 +8,15 @@ class PersonBase(BaseModel):
     name: str
 
 
-class PersonCreate(PersonBase):
-    pass
+class PersonCreate(BaseModel):
+    name: str
+    # group_id is not included - person is always created within a group context
 
 
 class PersonResponse(PersonBase):
     id: int
     created_at: datetime
+    group_id: int  # Now included to show which group the person belongs to
 
     class Config:
         from_attributes = True
@@ -22,23 +24,24 @@ class PersonResponse(PersonBase):
 
 class PersonUpdate(BaseModel):
     name: str
+    # Cannot update group_id - person is permanently tied to their group
 
 
 # group -------------------------------------
 class GroupBase(BaseModel):
     name: str
-    people: list[PersonResponse]
 
 
 class GroupCreate(BaseModel):
-    people: list[str]  # Accept list of names, convert to Person objects
-    # name is optional in creation - will default to "Group #{id}"
+    name: str | None = None  # Optional - will default to "Group #{id}"
+    people: list[str] = []  # Accept list of names, create Person objects in this group
 
 
 class GroupResponse(GroupBase):
     id: int
     created_at: datetime
     slug: str
+    people: list[PersonResponse] = []
     receipts: list[ReceiptResponse] = []
 
     class Config:
@@ -46,30 +49,28 @@ class GroupResponse(GroupBase):
 
 
 class GroupUpdate(BaseModel):
-    people: list[str] | None = None  # Accept list of names
     name: str | None = None  # Allow updating just the name
+    people: list[str] | None = None  # Accept list of names to replace current people
 
 
-# NEW: Dedicated schema for updating just the group name
 class GroupNameUpdate(BaseModel):
+    """Dedicated schema for updating just the group name"""
     name: str
 
 
 # receipt ---------------------------------------
 class ReceiptBase(BaseModel):
-    processed: bool = False
     name: str
+    processed: bool = False
     raw_data: str | None = None  # Optional raw receipt data
-    paid_by: PersonResponse | None = None  # Who paid for this receipt
-    people: list[PersonResponse] = []  # Receipt-specific people list
 
 
 class ReceiptCreate(BaseModel):
-    processed: bool = False
     name: str
+    processed: bool = False
     raw_data: str | None = None
-    paid_by: str | None = None  # Accept person name, convert to Person object
-    people: list[str] = []  # Accept list of names, convert to Person objects
+    paid_by: str | None = None  # Person name - will get or create in group
+    people: list[str] = []  # Person names - will get or create in group
     entries: list[ReceiptEntryCreate] = []
 
 
@@ -77,6 +78,8 @@ class ReceiptResponse(ReceiptBase):
     id: int
     created_at: datetime
     group_id: int
+    paid_by: PersonResponse | None = None
+    people: list[PersonResponse] = []
     entries: list[ReceiptEntryResponse] = []
 
     class Config:
@@ -84,9 +87,11 @@ class ReceiptResponse(ReceiptBase):
 
 
 class ReceiptUpdate(BaseModel):
-    people: list[str] | None = None  # Accept list of names
+    name: str | None = None
     processed: bool | None = None
-    paid_by: str | None = None
+    paid_by: str | None = None  # Person name
+    people: list[str] | None = None  # Person names
+    # Note: Cannot change group_id - receipt stays in original group
 
 
 # receipt entry ---------------------------------------
@@ -94,32 +99,32 @@ class ReceiptEntryBase(BaseModel):
     name: str
     price: float
     taxable: bool = True
-    assigned_to: list[PersonResponse] = []
 
 
 class ReceiptEntryCreate(BaseModel):
     name: str
     price: float
     taxable: bool = True
-    assigned_to: list[str] = []
+    assigned_to: list[str] = []  # Person names
 
 
 class ReceiptEntryResponse(ReceiptEntryBase):
     id: int
     receipt_id: int
+    assigned_to: list[PersonResponse] = []
 
     class Config:
         from_attributes = True
 
 
 class ReceiptEntryUpdate(BaseModel):
-    assigned_to: list[str] | None = None
     name: str | None = None
     price: float | None = None
     taxable: bool | None = None
+    assigned_to: list[str] | None = None  # Person names
 
 
-# build models
+# Build forward references
 ReceiptResponse.model_rebuild()
 ReceiptEntryResponse.model_rebuild()
 GroupResponse.model_rebuild()

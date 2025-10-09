@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,7 +17,6 @@ from .schemas import (
     GroupNameUpdate,
     ReceiptCreate,
     ReceiptUpdate,
-    PersonCreate,
     PersonResponse,
     PersonUpdate,
     ReceiptEntryCreate,
@@ -25,6 +24,17 @@ from .schemas import (
 )
 
 from .websocket_manager import connection_manager
+from .crud import (
+    get_or_create_person,
+    get_people_by_names,
+    create_receipt,
+    update_receipt_people,
+    update_receipt_paid_by,
+    create_receipt_entry,
+    update_entry_assigned_people,
+    get_group_people,
+    get_group_receipts,
+)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -65,21 +75,6 @@ SessionDep = Annotated[Session, Depends(get_session)]
 # ============================================================================
 # Helper functions
 # ============================================================================
-
-def get_or_create_person(db: Session, name: str) -> Person:
-    """Get existing person by name or create a new one"""
-    person = db.query(Person).filter(Person.name == name).first()
-    if not person:
-        person = Person(name=name)
-        db.add(person)
-        db.flush()
-    return person
-
-
-def get_persons_from_names(db: Session, names: list[str]) -> list[Person]:
-    """Convert list of names to list of Person objects"""
-    return [get_or_create_person(db, name) for name in names]
-
 
 def persons_to_names(persons: list[Person]) -> list[str]:
     """Convert list of Person objects to list of names"""
@@ -206,93 +201,47 @@ def root():
 
 
 # ============================================================================
-# Person endpoints
+# Person endpoints (within group context)
 # ============================================================================
 
-@app.get("/people/", response_model=list[PersonResponse])
-def list_people(db: SessionDep):
-    """Get all people"""
-    return db.query(Person).all()
-
-
-@app.post("/people/", response_model=PersonResponse)
-async def create_person(person: PersonCreate, db: SessionDep):
-    """Create a new person"""
-    existing = db.query(Person).filter(Person.name == person.name).first()
-    if existing:
-        raise HTTPException(
-            status_code=400, detail="Person with this name already exists"
-        )
-
-    db_person = Person(name=person.name)
-    db.add(db_person)
-    db.commit()
-    db.refresh(db_person)
-
-    # Broadcast to all groups
-    for group_id in list(connection_manager.group_connections.keys()):
-        await broadcast_group_update(group_id, "person_created")
-
-    return db_person
+@app.get("/groups/{group_id}/people/", response_model=list[PersonResponse])
+def list_group_people(group_id: int, db: SessionDep):
+    """Get all people in a group"""
+    group = db.query(Group).filter(Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    return get_group_people(db, group_id)
 
 
 @app.patch("/people/{person_id}", response_model=PersonResponse)
 async def update_person(person_id: int, person_update: PersonUpdate, db: SessionDep):
-    """Update a person's name"""
+    """Update a person's name (within their group)"""
     person = db.query(Person).filter(Person.id == person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
-
-    existing = (
-        db.query(Person)
-        .filter(Person.name == person_update.name, Person.id != person_id)
-        .first()
-    )
+    
+    # Check if new name already exists in the same group
+    existing = db.query(Person).filter(
+        Person.name == person_update.name,
+        Person.group_id == person.group_id,
+        Person.id != person_id
+    ).first()
+    
     if existing:
         raise HTTPException(
-            status_code=400, detail="Person with this name already exists"
+            status_code=400, 
+            detail=f"Person with name '{person_update.name}' already exists in this group"
         )
-
+    
     person.name = person_update.name
     db.commit()
     db.refresh(person)
-
-    # Broadcast to all affected groups
-    groups_with_person = (
-        db.query(Group).filter(Group.people.any(Person.id == person_id)).all()
-    )
-    for group in groups_with_person:
-        await broadcast_group_update(group.id, "person_renamed")
-
+    
+    # Broadcast update to the person's group
+    await broadcast_group_update(person.group_id, "person_renamed")
+    
     return person
-
-
-@app.delete("/people/{person_id}")
-async def delete_person(person_id: int, db: SessionDep):
-    """Delete a person"""
-    person = db.query(Person).filter(Person.id == person_id).first()
-    if not person:
-        raise HTTPException(status_code=404, detail="Person not found")
-
-    if (
-        person.groups
-        or person.receipts
-        or person.paid_receipts
-        or person.assigned_entries
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot delete person who is referenced in groups or receipts",
-        )
-
-    db.delete(person)
-    db.commit()
-
-    # Broadcast to all groups
-    for group_id in list(connection_manager.group_connections.keys()):
-        await broadcast_group_update(group_id, "person_deleted")
-
-    return {"message": "Person deleted successfully"}
 
 
 # ============================================================================
@@ -307,21 +256,24 @@ def list_groups(db: SessionDep):
 
 
 @app.post("/groups/")
-async def create_group(group: GroupCreate, db: SessionDep):
+async def create_group_endpoint(group: GroupCreate, db: SessionDep):
     """Create a new group"""
-    people = get_persons_from_names(db, group.people)
-
     db_group = Group(
-        people=people,
         key_hash="placeholder_hash",
-        name="",
+        name=group.name or "",
     )
     db.add(db_group)
-    db.commit()
-    db.refresh(db_group)
+    db.flush()  # Get the ID
 
-    # Set default name based on ID
-    db_group.name = f"Group {db_group.id}"
+    # Set default name based on ID if not provided
+    if not db_group.name:
+        db_group.name = f"Group {db_group.id}"
+    
+    # Create people in this group
+    for person_name in group.people:
+        person = Person(name=person_name, group_id=db_group.id)
+        db.add(person)
+
     db.commit()
     db.refresh(db_group)
 
@@ -340,18 +292,20 @@ def get_group(group_id: int, db: SessionDep):
 
 
 @app.patch("/groups/{group_id}")
-async def update_group(group_id: int, group_update: GroupUpdate, db: SessionDep):
-    """Update group members"""
+async def update_group_endpoint(group_id: int, group_update: GroupUpdate, db: SessionDep):
+    """Update group name and/or people"""
     group = db.query(Group).filter(Group.id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    if group_update.people is not None:
-        people = get_persons_from_names(db, group_update.people)
-        group.people = people
-
     if group_update.name is not None:
         group.name = group_update.name
+
+    if group_update.people is not None:
+        # Replace all people in the group
+        # This will delete old people (cascade) and create new ones
+        people = get_people_by_names(db, group_update.people, group_id)
+        group.people = people
 
     db.commit()
     db.refresh(group)
@@ -362,7 +316,7 @@ async def update_group(group_id: int, group_update: GroupUpdate, db: SessionDep)
 
 
 @app.patch("/groups/{group_id}/name")
-async def update_group_name(
+async def update_group_name_endpoint(
     group_id: int, name_update: GroupNameUpdate, db: SessionDep
 ):
     """Update only the group name"""
@@ -380,8 +334,8 @@ async def update_group_name(
 
 
 @app.delete("/groups/{group_id}")
-async def delete_group(group_id: int, db: SessionDep):
-    """Delete a group and all its receipts"""
+async def delete_group_endpoint(group_id: int, db: SessionDep):
+    """Delete a group and all its receipts and people (CASCADE)"""
     group = db.query(Group).filter(Group.id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -399,37 +353,33 @@ async def delete_group(group_id: int, db: SessionDep):
 # ============================================================================
 
 @app.post("/groups/{group_id}/receipts/")
-async def create_receipt(group_id: int, receipt: ReceiptCreate, db: SessionDep):
-    """Create a new receipt"""
+async def create_receipt_endpoint(group_id: int, receipt_data: ReceiptCreate, db: SessionDep):
+    """Create a new receipt in a group"""
     group = db.query(Group).filter(Group.id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    people = get_persons_from_names(db, receipt.people)
-    paid_by_person = get_or_create_person(db, receipt.paid_by) if receipt.paid_by else None
-
-    db_receipt = Receipt(
+    # Use the CRUD helper to create receipt
+    db_receipt = create_receipt(
+        db=db,
         group_id=group_id,
-        processed=receipt.processed,
-        name=receipt.name,
-        raw_data=receipt.raw_data,
-        paid_by_person=paid_by_person,
-        people=people,
+        name=receipt_data.name,
+        paid_by_name=receipt_data.paid_by,
+        people_names=receipt_data.people,
+        processed=receipt_data.processed,
+        raw_data=receipt_data.raw_data,
     )
-    db.add(db_receipt)
-    db.flush()
 
     # Create entries
-    for entry_data in receipt.entries:
-        assigned_people = get_persons_from_names(db, entry_data.assigned_to)
-        db_entry = ReceiptEntry(
-            receipt_id=db_receipt.id,
+    for entry_data in receipt_data.entries:
+        create_receipt_entry(
+            db=db,
+            receipt=db_receipt,
             name=entry_data.name,
             price=entry_data.price,
             taxable=entry_data.taxable,
-            assigned_to_people=assigned_people,
+            assigned_to_names=entry_data.assigned_to,
         )
-        db.add(db_entry)
 
     db.commit()
     db.refresh(db_receipt)
@@ -440,7 +390,7 @@ async def create_receipt(group_id: int, receipt: ReceiptCreate, db: SessionDep):
 
 
 @app.patch("/receipts/{receipt_id}")
-async def update_receipt(
+async def update_receipt_endpoint(
     receipt_id: int, receipt_update: ReceiptUpdate, db: SessionDep
 ):
     """Update receipt details"""
@@ -450,18 +400,27 @@ async def update_receipt(
 
     group_id = receipt.group_id
 
+    # Update people
     if receipt_update.people is not None:
-        people = get_persons_from_names(db, receipt_update.people)
-        receipt.people = people
+        update_receipt_people(db, receipt, receipt_update.people)
+        
+        # If paid_by is no longer in the people list, clear it
+        if receipt.paid_by_person and receipt.paid_by_person.name not in receipt_update.people:
+            receipt.paid_by_id = None
 
+    # Update processed status
     if receipt_update.processed is not None:
         receipt.processed = receipt_update.processed
 
+    # Update name
+    if receipt_update.name is not None:
+        receipt.name = receipt_update.name
+
+    # Update paid_by
     if receipt_update.paid_by == "":
         receipt.paid_by_id = None
     elif receipt_update.paid_by is not None:
-        paid_by_person = get_or_create_person(db, receipt_update.paid_by)
-        receipt.paid_by_person = paid_by_person
+        update_receipt_paid_by(db, receipt, receipt_update.paid_by)
 
     db.commit()
     db.refresh(receipt)
@@ -472,8 +431,8 @@ async def update_receipt(
 
 
 @app.delete("/receipts/{receipt_id}")
-async def delete_receipt(receipt_id: int, db: SessionDep):
-    """Delete a receipt and all its entries"""
+async def delete_receipt_endpoint(receipt_id: int, db: SessionDep):
+    """Delete a receipt and all its entries (CASCADE)"""
     receipt = db.query(Receipt).filter(Receipt.id == receipt_id).first()
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
@@ -493,7 +452,7 @@ async def delete_receipt(receipt_id: int, db: SessionDep):
 # ============================================================================
 
 @app.post("/receipts/{receipt_id}/entries/")
-async def create_receipt_entry(
+async def create_receipt_entry_endpoint(
     receipt_id: int, entry_data: ReceiptEntryCreate, db: SessionDep
 ):
     """Create a new entry for a receipt"""
@@ -501,14 +460,16 @@ async def create_receipt_entry(
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
 
-    db_entry = ReceiptEntry(
-        receipt_id=receipt_id,
+    # Use CRUD helper
+    db_entry = create_receipt_entry(
+        db=db,
+        receipt=receipt,
         name=entry_data.name,
         price=entry_data.price,
         taxable=entry_data.taxable,
-        assigned_to_people=[],
+        assigned_to_names=entry_data.assigned_to,
     )
-    db.add(db_entry)
+
     db.commit()
     db.refresh(db_entry)
 
@@ -518,7 +479,7 @@ async def create_receipt_entry(
 
 
 @app.patch("/receipt-entries/{entry_id}")
-async def update_receipt_entry(
+async def update_receipt_entry_endpoint(
     entry_id: int, update_data: ReceiptEntryUpdate, db: SessionDep
 ):
     """Update a receipt entry"""
@@ -526,18 +487,21 @@ async def update_receipt_entry(
     if not entry:
         raise HTTPException(status_code=404, detail="Receipt entry not found")
 
+    # Update assigned people
     if update_data.assigned_to is not None:
-        assigned_people = get_persons_from_names(db, update_data.assigned_to)
-        entry.assigned_to_people = assigned_people
+        update_entry_assigned_people(db, entry, update_data.assigned_to)
 
+    # Update name
     if update_data.name is not None:
         entry.name = update_data.name
 
+    # Update price
     if update_data.price is not None:
         if update_data.price < 0:
             raise HTTPException(status_code=400, detail="Price must be non-negative")
         entry.price = update_data.price
 
+    # Update taxable
     if update_data.taxable is not None:
         entry.taxable = update_data.taxable
 
@@ -560,7 +524,7 @@ async def update_receipt_entry(
 
 
 @app.delete("/receipt-entries/{entry_id}")
-async def delete_receipt_entry(entry_id: int, db: SessionDep):
+async def delete_receipt_entry_endpoint(entry_id: int, db: SessionDep):
     """Delete a receipt entry"""
     entry = db.query(ReceiptEntry).filter(ReceiptEntry.id == entry_id).first()
     if not entry:

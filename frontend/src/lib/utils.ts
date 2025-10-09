@@ -6,6 +6,7 @@ export interface Person {
 	id: number;
 	name: string;
 	created_at: string;
+	group_id: number;  // NEW: Person now belongs to a single group
 }
 
 export interface ReceiptEntry {
@@ -186,11 +187,11 @@ export function fetchGroup(groupId: number) {
 	return get<Group>(`/groups/${groupId}`);
 }
 
-export function createGroup(groupData: { people: string[] }) {
+export function createGroup(groupData: { name?: string; people: string[] }) {
 	return post<Group>('/groups/', groupData);
 }
 
-export function updateGroup(groupId: number, groupData: { people: string[] }) {
+export function updateGroup(groupId: number, groupData: { name?: string; people?: string[] }) {
 	return patch<Group>(`/groups/${groupId}`, groupData);
 }
 
@@ -200,6 +201,18 @@ export function updateGroupName(groupId: number, newName: string) {
 
 export function deleteGroup(groupId: number) {
 	return del(`/groups/${groupId}`);
+}
+
+// ============================================================================
+// Person API functions (group-scoped)
+// ============================================================================
+
+export function fetchGroupPeople(groupId: number) {
+	return get<Person[]>(`/groups/${groupId}/people/`);
+}
+
+export function updatePerson(personId: number, name: string) {
+	return patch<Person>(`/people/${personId}`, { name });
 }
 
 // ============================================================================
@@ -218,6 +231,7 @@ export function createReceipt(groupId: number, receiptData: {
 }
 
 export function updateReceipt(receiptId: number, receiptData: { 
+	name?: string;
 	people?: string[]; 
 	processed?: boolean;
 	paid_by?: string | null;
@@ -257,24 +271,4 @@ export function updateReceiptEntryDetails(
 
 export function deleteReceiptEntry(entryId: number) {
 	return del(`/receipt-entries/${entryId}`);
-}
-
-// ============================================================================
-// Person API functions
-// ============================================================================
-
-export function fetchPeople() {
-	return get<Person[]>('/people/');
-}
-
-export function createPerson(name: string) {
-	return post<Person>('/people/', { name });
-}
-
-export function updatePerson(personId: number, name: string) {
-	return patch<Person>(`/people/${personId}`, { name });
-}
-
-export function deletePerson(personId: number) {
-	return del(`/people/${personId}`);
 }

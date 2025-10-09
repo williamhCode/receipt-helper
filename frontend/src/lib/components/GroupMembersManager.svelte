@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getInitials, fetchPeople, updatePerson, type Person } from '$lib/utils.js';
+	import { getInitials, fetchGroupPeople, updatePerson, type Person } from '$lib/utils.js';
 
 	let { 
 		people = $bindable(),
@@ -19,55 +19,65 @@
 	let editingName = $state('');
 	let allPeople: Person[] = $state([]);
 	let loading = $state(false);
-	let error = $state('');
-	// DOM element reference - not reactive state
 	let editInput: HTMLInputElement;
-	// Shake animation state
 	let shakingPerson = $state<string | null>(null);
 
-	// Load all people when component mounts
+	// Load all people for this group when component mounts
 	async function loadPeople() {
+		if (!group?.id) return;
+		
 		try {
-			allPeople = await fetchPeople();
+			allPeople = await fetchGroupPeople(group.id);
 		} catch (err) {
 			console.error('Failed to load people:', err);
 			allPeople = [];
 		}
 	}
 
-	// Load people on mount
+	// Load people on mount and when group changes
 	$effect(() => {
-		loadPeople();
+		if (group?.id) {
+			loadPeople();
+		}
 	});
 
 	async function addMember() {
 		if (!newMemberName.trim()) return;
 		
+		const trimmedName = newMemberName.trim();
+		
+		// Check if person already exists in the group
+		if (people.includes(trimmedName)) {
+			return;
+		}
+		
 		try {
-			const updatedPeople = [...people, newMemberName.trim()];
+			const updatedPeople = [...people, trimmedName];
 			await onUpdate(updatedPeople);
 			people = updatedPeople;
 			newMemberName = '';
 			showAddForm = false;
-			// Reload people list since we might have created a new person
+			// Reload people list since we created a new person
 			await loadPeople();
-		} catch (error) {
-			console.error('Failed to add member:', error);
+		} catch (err) {
+			console.error('Failed to add member:', err);
 		}
 	}
 
 	function checkPersonInReceipts(personName: string): boolean {
+		if (!group) return false;
+		
+		if (!group.receipts || group.receipts.length === 0) {
+			return false;
+		}
+		
 		for (const receipt of group.receipts) {
-			if (receipt.paid_by === personName) {
-        return true;
-			}
-			
 			if (receipt.people.includes(personName)) {
-        return true;
+				return true;
 			}
 		}
 
-    return false;
+		return false;
 	}
 
 	function triggerShake(personName: string) {
@@ -87,9 +97,8 @@
 			const updatedPeople = people.filter(person => person !== memberToRemove);
 			await onUpdate(updatedPeople);
 			people = updatedPeople;
-			error = ''; // Clear any previous errors
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to remove member';
+			console.error('Failed to remove member:', err);
 		}
 	}
 
@@ -101,7 +110,6 @@
 	function startEditing(personName: string) {
 		editingPerson = personName;
 		editingName = personName;
-		error = '';
 		// Focus and select the input after it's rendered
 		setTimeout(() => {
 			if (editInput) {
@@ -114,7 +122,6 @@
 	function cancelEditing() {
 		editingPerson = null;
 		editingName = '';
-		error = '';
 	}
 
 	async function saveEdit() {
@@ -125,7 +132,6 @@
 
 		try {
 			loading = true;
-			error = '';
 
 			// Find the person object by name
 			const person = allPeople.find(p => p.name === editingPerson);
@@ -151,7 +157,7 @@
 
 			cancelEditing();
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to update name';
+			console.error('Failed to update name:', err);
 		} finally {
 			loading = false;
 		}
@@ -174,16 +180,10 @@
 				onclick={() => showAddForm = true}
 				class="text-sm bg-blue-500 text-white px-2.5 py-1 rounded hover:bg-blue-600 transition-colors"
 			>
-        + Add
+				+ Add
 			</button>
 		{/if}
 	</div>
-
-	{#if error}
-		<div class="text-red-600 text-sm bg-red-50 border border-red-200 rounded p-2">
-			{error}
-		</div>
-	{/if}
 
 	<div class="flex flex-wrap gap-2">
 		{#each people as person}
@@ -244,11 +244,11 @@
 					}}
 					autofocus
 				/>
-				<!-- svelte-ignore a11y_consider_explicit_label -->
 				<button
 					onclick={addMember}
 					disabled={!newMemberName.trim()}
 					class="text-green-600 hover:text-green-800 disabled:opacity-50"
+					aria-label="Add member"
 				>
 					<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
