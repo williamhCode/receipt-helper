@@ -56,7 +56,7 @@
 	<div class="flex flex-wrap gap-1">
 		{#each receiptPeople as person}
 			<div class="group relative bg-green-100 text-green-800 px-2 py-1 rounded text-xs flex items-center space-x-1">
-				<span class="font-medium text-xs bg-green-200 text-green-900 w-4 h-4 rounded-full flex items-center justify-center text-[10px]">
+				<span class="font-medium text-xs bg-green-200 text-green-900 w-5 h-4 rounded-full flex items-center justify-center text-[10px]">
 					{getInitials(person)}
 				</span>
 				<span class="text-xs">{person}</span>
