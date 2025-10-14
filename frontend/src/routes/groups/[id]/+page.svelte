@@ -611,7 +611,7 @@
 												
 												<!-- Add New Entry Row -->
 												<tr class="border-t border-gray-200 bg-gray-50">
-													<td colspan="100%" class="p-2 text-center">
+													<td colspan="100" class="p-2 text-center">
 														<button
 															onclick={() => addNewEntry(receipt.id)}
 															class="text-xs text-blue-600 hover:text-blue-800 font-medium"
