@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { API_BASE } from '$lib/utils.js';
+	import { API_BASE } from '$lib/api';
 
 	let { error = $bindable(), onDismiss }: { 
 		error: string; 

@@ -3,7 +3,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { fetchGroups, createGroup, handleError, type Group } from '$lib/utils.js';
+	import { fetchGroups, createGroup, handleError } from '$lib/api';
+	import type { Group } from '$lib/types';
 	import ErrorDisplay from '$lib/components/ErrorDisplay.svelte';
 
 	// State using runes
@@ -46,10 +47,6 @@
 		} catch (err) {
 			error = handleError(err, 'Failed to create group');
 		}
-	}
-
-	function navigateToGroup(groupId: number) {
-		goto(`/groups/${groupId}`);
 	}
 
 	onMount(loadGroups);
@@ -102,9 +99,10 @@
 		<!-- Groups Grid -->
 		<div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
 			{#each groups as group}
-				<div
+
+				<a
 					class="bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow duration-200 cursor-pointer border border-gray-200"
-					onclick={() => navigateToGroup(group.id)}
+          href={`/groups/${group.id}`}
 				>
 					<div class="p-6">
 						<!-- Group Header -->
@@ -158,7 +156,7 @@
 							</div>
 						</div>
 					</div>
-				</div>
+				</a>
 			{/each}
 		</div>
 	{/if}

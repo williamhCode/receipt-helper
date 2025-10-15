@@ -1,30 +1,25 @@
 from __future__ import annotations
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, field_validator
 from datetime import datetime
+from . import models
 
 
 # person -------------------------------------
-class PersonBase(BaseModel):
-    name: str
-
-
 class PersonCreate(BaseModel):
     name: str
-    # group_id is not included - person is always created within a group context
 
 
-class PersonResponse(PersonBase):
+class Person(BaseModel):
     id: int
     created_at: datetime
-    group_id: int  # Now included to show which group the person belongs to
+    name: str
+    group_id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PersonUpdate(BaseModel):
     name: str
-    # Cannot update group_id - person is permanently tied to their group
 
 
 # group -------------------------------------
@@ -33,65 +28,86 @@ class GroupBase(BaseModel):
 
 
 class GroupCreate(BaseModel):
-    name: str | None = None  # Optional - will default to "Group #{id}"
-    people: list[str] = []  # Accept list of names, create Person objects in this group
+    name: str | None = None
+    people: list[str] = []
 
 
-class GroupResponse(GroupBase):
+class Group(GroupBase):
     id: int
     created_at: datetime
     slug: str
-    people: list[PersonResponse] = []
-    receipts: list[ReceiptResponse] = []
+    people: list[str] = []
+    receipts: list[Receipt] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("people", mode="before")
+    @classmethod
+    def convert_people_to_names(cls, v):
+        if v and isinstance(v[0], models.Person):
+            return [person.name for person in v]
+        return v
 
 
 class GroupUpdate(BaseModel):
-    name: str | None = None  # Allow updating just the name
-    people: list[str] | None = None  # Accept list of names to replace current people
-
-
-class GroupNameUpdate(BaseModel):
-    """Dedicated schema for updating just the group name"""
-    name: str
+    name: str | None = None
+    people: list[str] | None = None
 
 
 # receipt ---------------------------------------
 class ReceiptBase(BaseModel):
     name: str
     processed: bool = False
-    raw_data: str | None = None  # Optional raw receipt data
+    raw_data: str | None = None
 
 
 class ReceiptCreate(BaseModel):
     name: str
     processed: bool = False
     raw_data: str | None = None
-    paid_by: str | None = None  # Person name - will get or create in group
-    people: list[str] = []  # Person names - will get or create in group
+    paid_by: str | None = None
+    people: list[str] = []
     entries: list[ReceiptEntryCreate] = []
 
+    @field_validator("people", mode="before")
+    @classmethod
+    def convert_people_to_names(cls, v):
+        if v and isinstance(v[0], models.Person):
+            return [person.name for person in v]
+        return v
 
-class ReceiptResponse(ReceiptBase):
+    @field_validator("paid_by", mode="before")
+    @classmethod
+    def convert_paid_by_to_name(cls, v):
+        # Here 'v' is a single SQLAlchemy Person object, not a list
+        if isinstance(v, models.Person):
+            return v.name
+        return v
+
+
+class Receipt(ReceiptBase):
     id: int
     created_at: datetime
     group_id: int
-    paid_by: PersonResponse | None = None
-    people: list[PersonResponse] = []
-    entries: list[ReceiptEntryResponse] = []
+    paid_by: str | None = None
+    people: list[str] = []
+    entries: list[ReceiptEntry] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("people", mode="before")
+    @classmethod
+    def convert_people_to_names(cls, v):
+        if v and isinstance(v[0], models.Person):
+            return [person.name for person in v]
+        return v
 
 
 class ReceiptUpdate(BaseModel):
     name: str | None = None
     processed: bool | None = None
-    paid_by: str | None = None  # Person name
-    people: list[str] | None = None  # Person names
-    # Note: Cannot change group_id - receipt stays in original group
+    paid_by: str | None = None
+    people: list[str] | None = None
 
 
 # receipt entry ---------------------------------------
@@ -105,16 +121,21 @@ class ReceiptEntryCreate(BaseModel):
     name: str
     price: float
     taxable: bool = True
-    assigned_to: list[str] = []  # Person names
+    assigned_to: list[str] = []
 
 
-class ReceiptEntryResponse(ReceiptEntryBase):
+class ReceiptEntry(ReceiptEntryBase):
     id: int
     receipt_id: int
-    assigned_to: list[PersonResponse] = []
+    assigned_to: list[str] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("assigned_to", mode="before")
+    def convert_people_to_names(cls, v):
+        if v and isinstance(v[0], models.Person):
+            return [person.name for person in v]
+        return v
 
 
 class ReceiptEntryUpdate(BaseModel):
@@ -125,6 +146,6 @@ class ReceiptEntryUpdate(BaseModel):
 
 
 # Build forward references
-ReceiptResponse.model_rebuild()
-ReceiptEntryResponse.model_rebuild()
-GroupResponse.model_rebuild()
+Receipt.model_rebuild()
+ReceiptEntry.model_rebuild()
+Group.model_rebuild()

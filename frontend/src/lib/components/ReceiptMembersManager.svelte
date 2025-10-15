@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { getInitials } from '$lib/utils.js';
+	import { getInitials } from '$lib/utils';
 
-	let { 
+	let {
 		receiptPeople = $bindable(),
 		groupPeople,
 		onUpdate

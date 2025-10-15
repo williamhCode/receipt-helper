@@ -1,7 +1,9 @@
 <script lang="ts">
-	import { getInitials, fetchGroupPeople, updatePerson, type Person } from '$lib/utils.js';
+	import { fetchGroupPeople, updatePerson } from '$lib/api';
+	import type { Person } from '$lib/types';
+	import { getInitials } from '$lib/utils';
 
-	let { 
+	let {
 		people = $bindable(),
 		onUpdate,
 		onPersonRenamed,
@@ -43,18 +45,17 @@
 
 	async function addMember() {
 		if (!newMemberName.trim()) return;
-		
+
 		const trimmedName = newMemberName.trim();
-		
+
 		// Check if person already exists in the group
 		if (people.includes(trimmedName)) {
 			return;
 		}
-		
+
 		try {
 			const updatedPeople = [...people, trimmedName];
 			await onUpdate(updatedPeople);
-			people = updatedPeople;
 			newMemberName = '';
 			showAddForm = false;
 			// Reload people list since we created a new person
@@ -66,11 +67,11 @@
 
 	function checkPersonInReceipts(personName: string): boolean {
 		if (!group) return false;
-		
+
 		if (!group.receipts || group.receipts.length === 0) {
 			return false;
 		}
-		
+
 		for (const receipt of group.receipts) {
 			if (receipt.people.includes(personName)) {
 				return true;
@@ -94,9 +95,8 @@
 				return;
 			}
 
-			const updatedPeople = people.filter(person => person !== memberToRemove);
+			const updatedPeople = people.filter(p => p !== memberToRemove);
 			await onUpdate(updatedPeople);
-			people = updatedPeople;
 		} catch (err) {
 			console.error('Failed to remove member:', err);
 		}
@@ -141,11 +141,10 @@
 
 			// Update the person's name in the backend
 			await updatePerson(person.id, editingName.trim());
-			
+
 			// Update the local people array
 			const updatedPeople = people.map(p => p === editingPerson ? editingName.trim() : p);
 			await onUpdate(updatedPeople);
-			people = updatedPeople;
 
 			// Reload people list to get updated data
 			await loadPeople();
@@ -192,7 +191,7 @@
 				<span class="font-medium text-xs bg-blue-200 text-blue-900 w-7 h-6 rounded-full flex items-center justify-center">
 					{getInitials(person)}
 				</span>
-				
+
 				{#if editingPerson === person}
 					<!-- Editing mode -->
 					<input
@@ -206,7 +205,7 @@
 					/>
 				{:else}
 					<!-- Display mode -->
-					<span 
+					<span
 						onclick={() => startEditing(person)}
 						class="cursor-pointer hover:bg-blue-200 rounded px-1 transition-colors"
 						title="Click to rename"

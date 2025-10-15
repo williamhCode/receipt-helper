@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Group } from '$lib/utils.js';
+	import type { Group } from '$lib/types';
 
 	let { 
 		show = $bindable(), 

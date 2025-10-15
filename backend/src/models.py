@@ -1,5 +1,6 @@
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Table
 from sqlalchemy import func
 
@@ -7,7 +8,7 @@ from datetime import datetime
 import base64, uuid
 
 
-class Base(DeclarativeBase):
+class Base(DeclarativeBase, AsyncAttrs):
     pass
 
 
@@ -47,14 +48,16 @@ class Group(Base):
     people: Mapped[list["Person"]] = relationship(
         back_populates="group",
         cascade="all, delete-orphan",
-        order_by="Person.id"
+        order_by="Person.id",
+        lazy="selectin"
     )
     
     # One-to-many: A group has many receipts
     receipts: Mapped[list["Receipt"]] = relationship(
         back_populates="group",
         cascade="all, delete-orphan",
-        order_by="Receipt.id"
+        order_by="Receipt.id",
+        lazy="selectin"
     )
 
 
@@ -122,21 +125,24 @@ class Receipt(Base):
     paid_by_person: Mapped[Person | None] = relationship(
         "Person", 
         foreign_keys=[paid_by_id], 
-        back_populates="paid_receipts"
+        back_populates="paid_receipts",
+        lazy="selectin"
     )
 
     # Many-to-many: Receipt can involve multiple people (all must be in same group)
     people: Mapped[list[Person]] = relationship(
         secondary=receipt_person_association, 
         back_populates="receipts",
-        order_by="Person.id"
+        order_by="Person.id",
+        lazy="selectin"
     )
 
     # One-to-many: Receipt has many entries
     entries: Mapped[list["ReceiptEntry"]] = relationship(
         back_populates="receipt", 
         cascade="all, delete-orphan",
-        order_by="ReceiptEntry.id"
+        order_by="ReceiptEntry.id",
+        lazy="selectin"
     )
 
 
@@ -160,5 +166,6 @@ class ReceiptEntry(Base):
     assigned_to_people: Mapped[list[Person]] = relationship(
         secondary=receipt_entry_person_association, 
         back_populates="assigned_entries",
-        order_by="Person.id"
+        order_by="Person.id",
+        lazy="selectin"
     )

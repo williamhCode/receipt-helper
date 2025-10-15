@@ -1,36 +1,54 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from src.models import Person, Receipt, ReceiptEntry, Group
 
 
-def get_or_create_person(db: Session, name: str, group_id: int) -> Person:
-    """
-    Get existing person by name in group, or create new one.
-    Simple and straightforward - let the database handle constraints.
-    """
+async def get_or_create_person(db: AsyncSession, group_id: int, name: str):
     stmt = select(Person).where(
         Person.name == name,
         Person.group_id == group_id
     )
-    person = db.scalars(stmt).first()
+    result = await db.execute(stmt)
+    person = result.scalars().first()
     
     if not person:
         person = Person(name=name, group_id=group_id)
         db.add(person)
-        db.flush()  # Get ID without committing
+        await db.flush()
     
     return person
 
 
-def get_people_by_names(db: Session, names: list[str], group_id: int) -> list[Person]:
-    """
-    Get or create multiple people by names in a group.
-    """
-    return [get_or_create_person(db, name, group_id) for name in names]
+async def get_or_create_people(db: AsyncSession, group_id: int, names: list[str]) -> list[Person]:
+    if not names:
+        return []
+
+    # Fetch all existing people with these names in this group
+    stmt = select(Person).where(
+        Person.group_id == group_id,
+        Person.name.in_(names)
+    )
+    result = await db.execute(stmt)
+    existing_people = {person.name: person for person in result.scalars().all()}
+
+    people = []
+    for name in names:
+        person = existing_people.get(name)
+        if person is not None:
+            people.append(person)
+        else:
+            new_person = Person(name=name, group_id=group_id)
+            db.add(new_person)
+            people.append(new_person)
+
+    if people:
+        await db.flush()
+
+    return people
 
 
-def create_receipt(
-    db: Session,
+async def create_receipt(
+    db: AsyncSession,
     group_id: int,
     name: str,
     paid_by_name: str | None = None,
@@ -38,60 +56,27 @@ def create_receipt(
     processed: bool = False,
     raw_data: str | None = None,
 ) -> Receipt:
-    """
-    Create a receipt in a group with people.
-    """
+
     receipt = Receipt(
         name=name,
         group_id=group_id,
         processed=processed,
         raw_data=raw_data,
     )
-    
-    # Handle paid_by
+
     if paid_by_name:
-        paid_by = get_or_create_person(db, paid_by_name, group_id)
+        paid_by = await get_or_create_person(db, group_id, paid_by_name)
         receipt.paid_by_id = paid_by.id
-    
-    # Handle people list
-    receipt.people = get_people_by_names(db, people_names, group_id)
-    
+
+    receipt.people = await get_or_create_people(db, group_id, people_names)
+
     db.add(receipt)
-    db.flush()
+    await db.flush()
     return receipt
 
 
-def update_receipt_people(
-    db: Session,
-    receipt: Receipt,
-    people_names: list[str]
-) -> Receipt:
-    """
-    Update people associated with a receipt.
-    Uses the receipt's group_id automatically.
-    """
-    receipt.people = get_people_by_names(db, people_names, receipt.group_id)
-    return receipt
-
-
-def update_receipt_paid_by(
-    db: Session,
-    receipt: Receipt,
-    paid_by_name: str | None
-) -> Receipt:
-    """
-    Update who paid for a receipt.
-    """
-    if paid_by_name:
-        paid_by = get_or_create_person(db, paid_by_name, receipt.group_id)
-        receipt.paid_by_id = paid_by.id
-    else:
-        receipt.paid_by_id = None
-    return receipt
-
-
-def create_receipt_entry(
-    db: Session,
+async def create_receipt_entry(
+    db: AsyncSession,
     receipt: Receipt,
     name: str,
     price: float,
@@ -108,17 +93,17 @@ def create_receipt_entry(
         price=price,
         taxable=taxable,
     )
-    
+
     # Assign people (they'll be in the same group as the receipt)
-    entry.assigned_to_people = get_people_by_names(db, assigned_to_names, receipt.group_id)
-    
+    entry.assigned_to_people = await get_or_create_people(db, receipt.group_id, assigned_to_names)
+
     db.add(entry)
-    db.flush()
+    await db.flush()
     return entry
 
 
-def update_entry_assigned_people(
-    db: Session,
+async def update_entry_assigned_people(
+    db: AsyncSession,
     entry: ReceiptEntry,
     assigned_to_names: list[str]
 ) -> ReceiptEntry:
@@ -128,21 +113,34 @@ def update_entry_assigned_people(
     """
     # Get the group from the receipt
     group_id = entry.receipt.group_id
-    entry.assigned_to_people = get_people_by_names(db, assigned_to_names, group_id)
+    entry.assigned_to_people = await get_or_create_people(db, group_id, assigned_to_names)
     return entry
 
 
-def get_group_people(db: Session, group_id: int) -> list[Person]:
+async def update_receipt_people(
+    db: AsyncSession,
+    receipt: Receipt,
+    people_names: list[str]
+) -> Receipt:
     """
-    Get all people in a group.
+    Update people associated with a receipt.
+    Uses the receipt's group_id automatically.
     """
-    stmt = select(Person).where(Person.group_id == group_id).order_by(Person.name)
-    return list(db.scalars(stmt).all())
+    receipt.people = await get_or_create_people(db, receipt.group_id, people_names)
+    return receipt
 
 
-def get_group_receipts(db: Session, group_id: int) -> list[Receipt]:
+async def update_receipt_paid_by(
+    db: AsyncSession,
+    receipt: Receipt,
+    paid_by_name: str | None
+) -> Receipt:
     """
-    Get all receipts in a group.
+    Update who paid for a receipt.
     """
-    stmt = select(Receipt).where(Receipt.group_id == group_id).order_by(Receipt.created_at.desc())
-    return list(db.scalars(stmt).all())
+    if paid_by_name:
+        paid_by = await get_or_create_person(db, receipt.group_id, paid_by_name)
+        receipt.paid_by_id = paid_by.id
+    else:
+        receipt.paid_by_id = None
+    return receipt

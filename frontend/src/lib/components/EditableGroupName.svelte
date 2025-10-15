@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { updateGroupName } from '$lib/utils.js';
+	import { updateGroup } from '$lib/api';
 
 	let { 
 		groupId,
@@ -36,7 +36,7 @@
 		}
 
 		try {
-			const updatedGroup = await updateGroupName(groupId, name.trim());
+			const updatedGroup = await updateGroup(groupId, { name: name.trim() });
 			onNameUpdate(updatedGroup.name);
 			isEditing = false;
 		} catch (err) {

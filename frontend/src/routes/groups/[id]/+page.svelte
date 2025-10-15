@@ -2,8 +2,8 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { 
-		fetchGroup, 
+	import {
+		fetchGroup,
 		createReceipt,
 		updateGroup,
 		updateReceipt,
@@ -13,17 +13,16 @@
 		deleteReceiptEntry,
 		deleteReceipt,
 		deleteGroup,
-		handleError, 
-		calculateCombinedCosts, 
+		handleError
+	} from '$lib/api';
+	import {
+		calculateCombinedCosts,
 		calculateReceiptCosts,
 		calculateReceiptTotal,
-		getUnprocessedReceiptsTotal,
-		getInitials,
-		type Group, 
-		type Receipt,
-		type ReceiptEntry
-	} from '$lib/utils.js';
-	import { realtimeStore } from '$lib/stores/realtime.svelte.js';
+		getInitials
+	} from '$lib/utils';
+	import type { Group, Receipt, ReceiptEntry } from '$lib/types';
+	import { realtimeStore } from '$lib/stores/realtime.svelte';
 	import ErrorDisplay from '$lib/components/ErrorDisplay.svelte';
 	import NewReceiptModal from '$lib/components/NewReceiptModal.svelte';
 	import GroupMembersManager from '$lib/components/GroupMembersManager.svelte';
@@ -190,30 +189,17 @@
 				newAssignedTo = newAssignedTo.filter(p => p !== person);
 			}
 
-			entry.assigned_to = newAssignedTo;
-			group = group;
+      entry.assigned_to = newAssignedTo;
+      group = group;
 
-			await realtimeStore.updateEntry(entryId, newAssignedTo);
+      await updateReceiptEntryDetails(entryId, { assigned_to: newAssignedTo });
+
 		} catch (err) {
 			error = handleError(err, 'Failed to update assignment');
 			await refreshGroup();
 		} finally {
 			updatingEntries.delete(entryId);
 		}
-	}
-
-	function highlightEntry(entryId: number) {
-		if (updatingEntries.has(entryId)) return;
-
-		setTimeout(() => {
-			const entryElement = document.querySelector(`[data-entry-id="${entryId}"]`);
-			if (entryElement) {
-				entryElement.classList.add('bg-blue-100');
-				setTimeout(() => {
-					entryElement.classList.remove('bg-blue-100');
-				}, 1000);
-			}
-		}, 100);
 	}
 
 	function startEditEntry(receiptId: number, entryId: number, field: 'name' | 'price', currentValue: string | number) {
@@ -291,7 +277,6 @@
 	async function initializeRealtime() {
 		try {
 			realtimeStore.onRefreshGroup = refreshGroup;
-			realtimeStore.onEntryHighlight = highlightEntry;
 			await realtimeStore.connect(groupId);
 		} catch (err) {
 			console.error('Failed to initialize real-time connection:', err);
@@ -300,11 +285,11 @@
 
 	onMount(async () => {
 		await refreshGroup();
-		await initializeRealtime();
+		// await initializeRealtime();
 	});
 
 	onDestroy(() => {
-		realtimeStore.disconnect();
+		// realtimeStore.disconnect();
 	});
 </script>
 
@@ -395,7 +380,6 @@
 				<div class="space-y-2 mt-4 pt-4 border-t">
 					<p><span class="font-medium text-lg">Group ID:</span> <span class="font-mono text-sm bg-gray-100 px-2 py-1 rounded">{group.slug}</span></p>
 					<p><span class="font-medium text-lg">Total Receipts:</span> {group.receipts.length}</p>
-					<p><span class="font-medium text-lg">Unprocessed Total:</span> ${getUnprocessedReceiptsTotal(group).toFixed(2)}</p>
 				</div>
 			</div>
 
