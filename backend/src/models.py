@@ -57,7 +57,6 @@ class Group(Base):
         back_populates="group",
         cascade="all, delete-orphan",
         order_by="Receipt.id",
-        lazy="selectin"
     )
 
 
@@ -86,14 +85,14 @@ class Person(Base):
     paid_receipts: Mapped[list["Receipt"]] = relationship(
         "Receipt", 
         foreign_keys="Receipt.paid_by_id", 
-        back_populates="paid_by_person",
+        back_populates="paid_by",
         order_by="Receipt.id"
     )
     
     # Many-to-many: A person can be assigned to many receipt entries
     assigned_entries: Mapped[list["ReceiptEntry"]] = relationship(
         secondary=receipt_entry_person_association, 
-        back_populates="assigned_to_people",
+        back_populates="assigned_to",
         order_by="ReceiptEntry.id"
     )
 
@@ -122,7 +121,7 @@ class Receipt(Base):
     # Relationships
     group: Mapped[Group] = relationship(back_populates="receipts")
     
-    paid_by_person: Mapped[Person | None] = relationship(
+    paid_by: Mapped[Person | None] = relationship(
         "Person", 
         foreign_keys=[paid_by_id], 
         back_populates="paid_receipts",
@@ -142,7 +141,6 @@ class Receipt(Base):
         back_populates="receipt", 
         cascade="all, delete-orphan",
         order_by="ReceiptEntry.id",
-        lazy="selectin"
     )
 
 
@@ -163,7 +161,7 @@ class ReceiptEntry(Base):
     receipt: Mapped[Receipt] = relationship(back_populates="entries")
     
     # Many-to-many: Entry can be assigned to multiple people (all must be in same group as receipt)
-    assigned_to_people: Mapped[list[Person]] = relationship(
+    assigned_to: Mapped[list[Person]] = relationship(
         secondary=receipt_entry_person_association, 
         back_populates="assigned_entries",
         order_by="Person.id",

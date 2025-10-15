@@ -82,7 +82,9 @@
 	function handleUpdateGroupMembers(newPeople: string[]) {
 		if (!group) return;
 		return apiCall(
-			() => updateGroup(groupId, { people: newPeople }),
+			async () => {
+        group = await updateGroup(groupId, { people: newPeople })
+      },
 			'Failed to update group members'
 		);
 	}
@@ -154,7 +156,14 @@
 		if (!group) return;
 		const newPaidBy = newValue.trim() || null;
 		return apiCall(
-			() => updateReceiptPaidBy(receiptId, newPaidBy),
+			async () => {
+        await updateReceiptPaidBy(receiptId, newPaidBy)
+        const receipt = group?.receipts.find(r => r.id === receiptId);
+        if (receipt) {
+          receipt.paid_by = newPaidBy;
+          group = group;
+        }
+      },
 			'Failed to update paid by'
 		);
 	}

@@ -132,20 +132,38 @@ async def create_group(group: schemas.GroupCreate, db: SessionDep):
         db.add(person)
 
     await db.commit()
-    await db.refresh(db_group)
 
-    return db_group
+    stmt = (
+        select(models.Group)
+        .where(models.Group.id == db_group.id)
+        .options(
+            selectinload(models.Group.receipts).selectinload(models.Receipt.entries)
+        )
+    )
+    result_group = (await db.scalars(stmt)).first()
+
+    return result_group
 
 
 @app.get("/groups/", response_model=list[schemas.Group])
 async def get_groups(db: SessionDep):
-    groups = (await db.scalars(select(models.Group))).all()
+    stmt = select(models.Group).options(
+        selectinload(models.Group.receipts).selectinload(models.Receipt.entries)
+    )
+    groups = (await db.scalars(stmt)).all()
     return groups
 
 
 @app.get("/groups/{group_id}", response_model=schemas.Group)
 async def get_group(group_id: int, db: SessionDep):
-    group = await db.get(models.Group, group_id)
+    stmt = (
+        select(models.Group)
+        .where(models.Group.id == group_id)
+        .options(
+            selectinload(models.Group.receipts).selectinload(models.Receipt.entries)
+        )
+    )
+    group = (await db.scalars(stmt)).first()
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
@@ -154,7 +172,14 @@ async def get_group(group_id: int, db: SessionDep):
 
 @app.patch("/groups/{group_id}", response_model=schemas.Group)
 async def update_group(group_id: int, group_update: schemas.GroupUpdate, db: SessionDep):
-    group = await db.get(models.Group, group_id)
+    stmt = (
+        select(models.Group)
+        .where(models.Group.id == group_id)
+        .options(
+            selectinload(models.Group.receipts).selectinload(models.Receipt.entries)
+        )
+    )
+    group = (await db.scalars(stmt)).first()
 
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -171,7 +196,7 @@ async def update_group(group_id: int, group_update: schemas.GroupUpdate, db: Ses
     return group
 
 
-@app.delete("/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete("/groups/{group_id}")
 async def delete_group(group_id: int, db: SessionDep):
     group = await db.get(models.Group, group_id)
     if not group:
@@ -179,6 +204,8 @@ async def delete_group(group_id: int, db: SessionDep):
 
     await db.delete(group)
     await db.commit()
+
+    return {"message": "Group deleted successfully", "id": group.id}
 
 
 # ============================================================================
@@ -264,7 +291,10 @@ async def create_receipt(group_id: int, receipt_data: schemas.ReceiptCreate, db:
 
 @app.get("/receipts/{receipt_id}", response_model=schemas.Receipt)
 async def get_receipt(receipt_id: int, db: SessionDep):
-    receipt = await db.get(models.Receipt, receipt_id)
+    stmt = select(models.Receipt).where(models.Receipt.id == receipt_id).options(
+        selectinload(models.Receipt.entries)
+    )
+    receipt = (await db.scalars(stmt)).first()
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
 
@@ -276,7 +306,13 @@ async def update_receipt(
     receipt_id: int, receipt_update: schemas.ReceiptUpdate, db: SessionDep
 ):
     """Update receipt details"""
-    receipt = await db.get(models.Receipt, receipt_id)
+    stmt = (
+        select(models.Receipt)
+        .where(models.Receipt.id == receipt_id)
+        .options(selectinload(models.Receipt.entries))
+    )
+    receipt = (await db.scalars(stmt)).first()
+
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
 
@@ -285,7 +321,7 @@ async def update_receipt(
         await crud.update_receipt_people(db, receipt, receipt_update.people)
 
         # If paid_by is no longer in the people list, clear it
-        if receipt.paid_by_person and receipt.paid_by_person.name not in receipt_update.people:
+        if receipt.paid_by and receipt.paid_by.name not in receipt_update.people:
             receipt.paid_by_id = None
 
     # Update processed status
@@ -354,8 +390,8 @@ async def create_receipt_entry(
 async def update_receipt_entry(
     entry_id: int, update_data: schemas.ReceiptEntryUpdate, db: SessionDep
 ):
-    """Update a receipt entry"""
     entry = await db.get(models.ReceiptEntry, entry_id)
+
     if not entry:
         raise HTTPException(status_code=404, detail="Receipt entry not found")
 

@@ -19,7 +19,7 @@ async def get_or_create_person(db: AsyncSession, group_id: int, name: str):
     return person
 
 
-async def get_or_create_people(db: AsyncSession, group_id: int, names: list[str]) -> list[Person]:
+async def get_or_create_people(db: AsyncSession, group_id: int, names: list[str]):
     if not names:
         return []
 
@@ -95,7 +95,7 @@ async def create_receipt_entry(
     )
 
     # Assign people (they'll be in the same group as the receipt)
-    entry.assigned_to_people = await get_or_create_people(db, receipt.group_id, assigned_to_names)
+    entry.assigned_to = await get_or_create_people(db, receipt.group_id, assigned_to_names)
 
     db.add(entry)
     await db.flush()
@@ -111,9 +111,11 @@ async def update_entry_assigned_people(
     Update people assigned to a receipt entry.
     Automatically uses the receipt's group.
     """
-    # Get the group from the receipt
-    group_id = entry.receipt.group_id
-    entry.assigned_to_people = await get_or_create_people(db, group_id, assigned_to_names)
+    receipt = await entry.awaitable_attrs.receipt
+    entry.assigned_to = await get_or_create_people(
+        db, receipt.group_id, assigned_to_names
+    )
+
     return entry
 
 
@@ -127,6 +129,7 @@ async def update_receipt_people(
     Uses the receipt's group_id automatically.
     """
     receipt.people = await get_or_create_people(db, receipt.group_id, people_names)
+
     return receipt
 
 

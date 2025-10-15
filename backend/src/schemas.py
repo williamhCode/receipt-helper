@@ -69,21 +69,6 @@ class ReceiptCreate(BaseModel):
     people: list[str] = []
     entries: list[ReceiptEntryCreate] = []
 
-    @field_validator("people", mode="before")
-    @classmethod
-    def convert_people_to_names(cls, v):
-        if v and isinstance(v[0], models.Person):
-            return [person.name for person in v]
-        return v
-
-    @field_validator("paid_by", mode="before")
-    @classmethod
-    def convert_paid_by_to_name(cls, v):
-        # Here 'v' is a single SQLAlchemy Person object, not a list
-        if isinstance(v, models.Person):
-            return v.name
-        return v
-
 
 class Receipt(ReceiptBase):
     id: int
@@ -94,6 +79,13 @@ class Receipt(ReceiptBase):
     entries: list[ReceiptEntry] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("paid_by", mode="before")
+    @classmethod
+    def convert_paid_by_to_name(cls, v):
+        if isinstance(v, models.Person):
+            return v.name
+        return v
 
     @field_validator("people", mode="before")
     @classmethod
@@ -132,6 +124,7 @@ class ReceiptEntry(ReceiptEntryBase):
     model_config = ConfigDict(from_attributes=True)
 
     @field_validator("assigned_to", mode="before")
+    @classmethod
     def convert_people_to_names(cls, v):
         if v and isinstance(v[0], models.Person):
             return [person.name for person in v]
