@@ -1,6 +1,7 @@
 export interface Group {
 	id: number;
 	created_at: string;
+	updated_at: string;
 	slug: string;
 	name: string;
 	people: string[];

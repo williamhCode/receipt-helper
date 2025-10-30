@@ -6,12 +6,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import selectinload
 
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from src import models, schemas, crud
-
-from .websocket_manager import connection_manager
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -46,59 +44,6 @@ async def get_session():
 
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
-
-
-# ============================================================================
-# WebSocket endpoints
-# ============================================================================
-
-# @app.websocket("/ws/groups/{group_id}")
-# async def websocket_endpoint(websocket: WebSocket, group_id: int):
-#     """WebSocket endpoint for real-time updates within a group"""
-#     # Verify group exists
-#     with Session(engine) as db:
-#         group = db.query(Group).filter(Group.id == group_id).first()
-#         if not group:
-#             await websocket.close(code=1008, reason="Group not found")
-#             return
-
-#     # Connect the websocket
-#     await connection_manager.connect(websocket, group_id)
-
-#     try:
-#         # Send initial connection confirmation
-#         await connection_manager.send_to_websocket(
-#             websocket,
-#             {
-#                 "type": "connected",
-#                 "group_id": group_id,
-#                 "message": f"Connected to group {group_id}",
-#             },
-#         )
-
-#         # Keep connection alive and handle incoming messages
-#         while True:
-#             try:
-#                 data = await websocket.receive_text()
-#                 message = json.loads(data)
-
-#                 # Handle ping messages for connection health
-#                 if message.get("type") == "ping":
-#                     await connection_manager.send_to_websocket(
-#                         websocket,
-#                         {"type": "pong", "timestamp": message.get("timestamp")},
-#                     )
-
-#             except json.JSONDecodeError:
-#                 await connection_manager.send_to_websocket(
-#                     websocket, {"type": "error", "message": "Invalid JSON format"}
-#                 )
-
-#     except WebSocketDisconnect:
-#         await connection_manager.disconnect(websocket)
-#     except Exception as e:
-#         logger.error(f"WebSocket error: {e}")
-#         await connection_manager.disconnect(websocket)
 
 
 # ============================================================================
@@ -168,6 +113,26 @@ async def get_group(group_id: int, db: SessionDep):
         raise HTTPException(status_code=404, detail="Group not found")
 
     return group
+
+
+@app.get("/groups/{group_id}/version")
+async def get_group_version(group_id: int, db: SessionDep):
+    """Lightweight endpoint to check if group has been updated.
+
+    Returns the last update timestamp for efficient polling.
+    Clients can poll this endpoint to detect changes without fetching full group data.
+    """
+    stmt = select(models.Group.updated_at).where(models.Group.id == group_id)
+    result = await db.execute(stmt)
+    updated_at = result.scalar_one_or_none()
+
+    if updated_at is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    return {
+        "group_id": group_id,
+        "updated_at": updated_at.isoformat()
+    }
 
 
 @app.patch("/groups/{group_id}", response_model=schemas.Group)
@@ -284,7 +249,12 @@ async def create_receipt(group_id: int, receipt_data: schemas.ReceiptCreate, db:
         )
 
     await db.commit()
-    await db.refresh(db_receipt)
+
+    # Reload receipt with all relationships loaded
+    stmt = select(models.Receipt).where(models.Receipt.id == db_receipt.id).options(
+        selectinload(models.Receipt.entries)
+    )
+    db_receipt = (await db.scalars(stmt)).first()
 
     return db_receipt
 
@@ -318,7 +288,9 @@ async def update_receipt(
 
     # Update people
     if receipt_update.people is not None:
-        await crud.update_receipt_people(db, receipt, receipt_update.people)
+        receipt.people = await crud.get_or_create_people(
+            db, receipt.group_id, receipt_update.people
+        )
 
         # If paid_by is no longer in the people list, clear it
         if receipt.paid_by and receipt.paid_by.name not in receipt_update.people:
@@ -336,10 +308,21 @@ async def update_receipt(
     if receipt_update.paid_by == "":
         receipt.paid_by_id = None
     elif receipt_update.paid_by is not None:
-        await crud.update_receipt_paid_by(db, receipt, receipt_update.paid_by)
+        if receipt_update.paid_by:
+            paid_by = await crud.get_or_create_person(
+                db, receipt.group_id, receipt_update.paid_by
+            )
+            receipt.paid_by_id = paid_by.id
+        else:
+            receipt.paid_by_id = None
 
     await db.commit()
-    await db.refresh(receipt)
+
+    # Reload receipt with entries
+    stmt = select(models.Receipt).where(models.Receipt.id == receipt_id).options(
+        selectinload(models.Receipt.entries)
+    )
+    receipt = (await db.scalars(stmt)).first()
 
     return receipt
 
@@ -390,13 +373,20 @@ async def create_receipt_entry(
 async def update_receipt_entry(
     entry_id: int, update_data: schemas.ReceiptEntryUpdate, db: SessionDep
 ):
-    entry = await db.get(models.ReceiptEntry, entry_id)
+    stmt = (
+        select(models.ReceiptEntry)
+        .where(models.ReceiptEntry.id == entry_id)
+        .options(selectinload(models.ReceiptEntry.assigned_to), selectinload(models.ReceiptEntry.receipt))
+    )
+    entry = (await db.scalars(stmt)).first()
 
     if not entry:
         raise HTTPException(status_code=404, detail="Receipt entry not found")
 
     if update_data.assigned_to is not None:
-        await crud.update_entry_assigned_people(db, entry, update_data.assigned_to)
+        entry.assigned_to = await crud.get_or_create_people(
+            db, entry.receipt.group_id, update_data.assigned_to
+        )
 
     if update_data.name is not None:
         entry.name = update_data.name

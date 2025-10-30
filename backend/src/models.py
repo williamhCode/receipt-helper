@@ -2,7 +2,7 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Table
-from sqlalchemy import func
+from sqlalchemy import func, event
 
 from datetime import datetime
 import base64, uuid
@@ -37,6 +37,9 @@ class Group(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
 
     slug: Mapped[str] = mapped_column(
         String(22), unique=True, default=new_slug, index=True
@@ -53,6 +56,7 @@ class Group(Base):
     )
     
     # One-to-many: A group has many receipts
+    # don't put selectin for performance reasons
     receipts: Mapped[list["Receipt"]] = relationship(
         back_populates="group",
         cascade="all, delete-orphan",
@@ -65,6 +69,9 @@ class Person(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
 
@@ -102,6 +109,9 @@ class Receipt(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     processed: Mapped[bool] = mapped_column(default=False)
@@ -137,8 +147,9 @@ class Receipt(Base):
     )
 
     # One-to-many: Receipt has many entries
+    # don't put selectin for performance reasons
     entries: Mapped[list["ReceiptEntry"]] = relationship(
-        back_populates="receipt", 
+        back_populates="receipt",
         cascade="all, delete-orphan",
         order_by="ReceiptEntry.id",
     )
@@ -148,6 +159,10 @@ class ReceiptEntry(Base):
     __tablename__ = "receipt_entry_table"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
 
     # Item details
     name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -162,8 +177,69 @@ class ReceiptEntry(Base):
     
     # Many-to-many: Entry can be assigned to multiple people (all must be in same group as receipt)
     assigned_to: Mapped[list[Person]] = relationship(
-        secondary=receipt_entry_person_association, 
+        secondary=receipt_entry_person_association,
         back_populates="assigned_entries",
         order_by="Person.id",
         lazy="selectin"
     )
+
+
+# ============================================================================
+# Event listeners to propagate updates to parent Group
+# ============================================================================
+
+def touch_group(mapper, connection, target):
+    """Update the parent group's updated_at timestamp"""
+    if hasattr(target, 'group_id'):
+        # For Person
+        connection.execute(
+            Group.__table__.update()
+            .where(Group.id == target.group_id)
+            .values(updated_at=func.now())
+        )
+    elif hasattr(target, 'receipt'):
+        # For ReceiptEntry - need to get the receipt's group_id
+        # This is handled via Receipt update cascading
+        pass
+
+
+def touch_group_via_receipt(mapper, connection, target):
+    """Update the parent group's updated_at timestamp via Receipt"""
+    if hasattr(target, 'group_id') and target.group_id:
+        connection.execute(
+            Group.__table__.update()
+            .where(Group.id == target.group_id)
+            .values(updated_at=func.now())
+        )
+
+
+# Register event listeners for cascading updates
+event.listen(Person, 'after_insert', touch_group)
+event.listen(Person, 'after_update', touch_group)
+event.listen(Person, 'after_delete', touch_group)
+
+event.listen(Receipt, 'after_insert', touch_group_via_receipt)
+event.listen(Receipt, 'after_update', touch_group_via_receipt)
+event.listen(Receipt, 'after_delete', touch_group_via_receipt)
+
+# ReceiptEntry updates will trigger both Receipt and Group updated_at
+def touch_receipt_and_group_from_entry(mapper, connection, target):
+    if hasattr(target, 'receipt_id') and target.receipt_id:
+        # First update the receipt
+        connection.execute(
+            Receipt.__table__.update()
+            .where(Receipt.id == target.receipt_id)
+            .values(updated_at=func.now())
+        )
+        # Then update the group (need to get group_id from receipt)
+        # Use a subquery to get the group_id from the receipt
+        from sqlalchemy import select as sql_select
+        connection.execute(
+            Group.__table__.update()
+            .where(Group.id == sql_select(Receipt.group_id).where(Receipt.id == target.receipt_id).scalar_subquery())
+            .values(updated_at=func.now())
+        )
+
+event.listen(ReceiptEntry, 'after_insert', touch_receipt_and_group_from_entry)
+event.listen(ReceiptEntry, 'after_update', touch_receipt_and_group_from_entry)
+event.listen(ReceiptEntry, 'after_delete', touch_receipt_and_group_from_entry)

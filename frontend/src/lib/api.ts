@@ -50,6 +50,10 @@ export function fetchGroup(groupId: number) {
 	return get<Group>(`/groups/${groupId}`);
 }
 
+export function fetchGroupVersion(groupId: number) {
+	return get<{ group_id: number; updated_at: string }>(`/groups/${groupId}/version`);
+}
+
 export function createGroup(groupData: { name?: string; people: string[] }) {
 	return post<Group>('/groups/', groupData);
 }

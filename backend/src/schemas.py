@@ -12,6 +12,7 @@ class PersonCreate(BaseModel):
 class Person(BaseModel):
     id: int
     created_at: datetime
+    updated_at: datetime
     name: str
     group_id: int
 
@@ -35,6 +36,7 @@ class GroupCreate(BaseModel):
 class Group(GroupBase):
     id: int
     created_at: datetime
+    updated_at: datetime
     slug: str
     people: list[str] = []
     receipts: list[Receipt] = []
@@ -73,6 +75,7 @@ class ReceiptCreate(BaseModel):
 class Receipt(ReceiptBase):
     id: int
     created_at: datetime
+    updated_at: datetime
     group_id: int
     paid_by: str | None = None
     people: list[str] = []
@@ -118,6 +121,8 @@ class ReceiptEntryCreate(BaseModel):
 
 class ReceiptEntry(ReceiptEntryBase):
     id: int
+    created_at: datetime
+    updated_at: datetime
     receipt_id: int
     assigned_to: list[str] = []
 

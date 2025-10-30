@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from src.models import Person, Receipt, ReceiptEntry, Group
+from src.models import Person, Receipt, ReceiptEntry
 
 
 async def get_or_create_person(db: AsyncSession, group_id: int, name: str):
@@ -23,7 +23,6 @@ async def get_or_create_people(db: AsyncSession, group_id: int, names: list[str]
     if not names:
         return []
 
-    # Fetch all existing people with these names in this group
     stmt = select(Person).where(
         Person.group_id == group_id,
         Person.name.in_(names)
@@ -83,10 +82,7 @@ async def create_receipt_entry(
     taxable: bool = True,
     assigned_to_names: list[str] = []
 ) -> ReceiptEntry:
-    """
-    Create a receipt entry with assigned people.
-    Automatically uses the receipt's group for people lookup.
-    """
+
     entry = ReceiptEntry(
         receipt_id=receipt.id,
         name=name,
@@ -94,56 +90,8 @@ async def create_receipt_entry(
         taxable=taxable,
     )
 
-    # Assign people (they'll be in the same group as the receipt)
     entry.assigned_to = await get_or_create_people(db, receipt.group_id, assigned_to_names)
 
     db.add(entry)
     await db.flush()
     return entry
-
-
-async def update_entry_assigned_people(
-    db: AsyncSession,
-    entry: ReceiptEntry,
-    assigned_to_names: list[str]
-) -> ReceiptEntry:
-    """
-    Update people assigned to a receipt entry.
-    Automatically uses the receipt's group.
-    """
-    receipt = await entry.awaitable_attrs.receipt
-    entry.assigned_to = await get_or_create_people(
-        db, receipt.group_id, assigned_to_names
-    )
-
-    return entry
-
-
-async def update_receipt_people(
-    db: AsyncSession,
-    receipt: Receipt,
-    people_names: list[str]
-) -> Receipt:
-    """
-    Update people associated with a receipt.
-    Uses the receipt's group_id automatically.
-    """
-    receipt.people = await get_or_create_people(db, receipt.group_id, people_names)
-
-    return receipt
-
-
-async def update_receipt_paid_by(
-    db: AsyncSession,
-    receipt: Receipt,
-    paid_by_name: str | None
-) -> Receipt:
-    """
-    Update who paid for a receipt.
-    """
-    if paid_by_name:
-        paid_by = await get_or_create_person(db, receipt.group_id, paid_by_name)
-        receipt.paid_by_id = paid_by.id
-    else:
-        receipt.paid_by_id = None
-    return receipt

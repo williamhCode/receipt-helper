@@ -4,6 +4,8 @@
 	import { goto } from '$app/navigation';
 	import {
 		fetchGroup,
+		fetchGroupVersion,
+		getReceipt,
 		createReceipt,
 		updateGroup,
 		updateReceipt,
@@ -22,7 +24,7 @@
 		getInitials
 	} from '$lib/utils';
 	import type { Group, Receipt, ReceiptEntry } from '$lib/types';
-	import { realtimeStore } from '$lib/stores/realtime.svelte';
+	import { pollingStore } from '$lib/stores/polling.svelte';
 	import ErrorDisplay from '$lib/components/ErrorDisplay.svelte';
 	import NewReceiptModal from '$lib/components/NewReceiptModal.svelte';
 	import GroupMembersManager from '$lib/components/GroupMembersManager.svelte';
@@ -39,8 +41,13 @@
 	let editingEntry = $state<{ receiptId: number; entryId: number; field: 'name' | 'price' } | null>(null);
 	let editingValue = $state('');
 	let updatingEntries = $state(new Set<number>());
+	let currentReceiptIndex = $state(0);
 
 	const groupId = $derived(parseInt($page.params.id));
+	const currentReceipt = $derived(group?.receipts[currentReceiptIndex] ?? null);
+	const hasReceipts = $derived(group && group.receipts.length > 0);
+	const canGoLeft = $derived(currentReceiptIndex > 0);
+	const canGoRight = $derived(group && currentReceiptIndex < group.receipts.length - 1);
 
 	// ============================================================================
 	// Data fetching
@@ -49,20 +56,58 @@
 	async function refreshGroup() {
 		try {
 			error = '';
-			group = await fetchGroup(groupId);
+			const updatedGroup = await fetchGroup(groupId);
+			group = updatedGroup;
 		} catch (err) {
 			error = handleError(err, 'Failed to refresh group');
+		}
+	}
+
+	async function refreshCurrentReceipt() {
+		try {
+			if (!group || !currentReceipt) return;
+
+			error = '';
+
+			// Fetch receipt and group version in parallel
+			const [updatedReceipt, versionData] = await Promise.all([
+				getReceipt(currentReceipt.id),
+				fetchGroupVersion(groupId)
+			]);
+
+			// Update only the current receipt in the group
+			const receiptIndex = group.receipts.findIndex(r => r.id === currentReceipt.id);
+			if (receiptIndex !== -1) {
+				group.receipts[receiptIndex] = updatedReceipt;
+				group = group; // Trigger Svelte reactivity
+			}
+
+			// Update polling store so next poll doesn't trigger unnecessary refresh
+			pollingStore.updateVersion(versionData.updated_at);
+		} catch (err) {
+			error = handleError(err, 'Failed to refresh receipt');
 		}
 	}
 
 	// ============================================================================
 	// API call wrappers (handle errors consistently)
 	// ============================================================================
-	
+
 	async function apiCall(fn: () => Promise<any>, errorMessage: string) {
 		try {
 			error = '';
 			await fn();
+			await refreshGroup(); // Refresh UI after successful operation
+		} catch (err) {
+			error = handleError(err, errorMessage);
+		}
+	}
+
+	async function receiptApiCall(fn: () => Promise<any>, errorMessage: string) {
+		try {
+			error = '';
+			await fn();
+			await refreshCurrentReceipt();
 		} catch (err) {
 			error = handleError(err, errorMessage);
 		}
@@ -112,7 +157,7 @@
 	
 	function handleUpdateReceiptMembers(receiptId: number, newPeople: string[]) {
 		if (!group) return;
-		return apiCall(
+		return receiptApiCall(
 			() => updateReceipt(receiptId, { people: newPeople }),
 			'Failed to update receipt members'
 		);
@@ -120,7 +165,7 @@
 
 	function handleToggleProcessed(receiptId: number, currentStatus: boolean) {
 		if (!group) return;
-		return apiCall(
+		return receiptApiCall(
 			() => updateReceipt(receiptId, { processed: !currentStatus }),
 			'Failed to update receipt status'
 		);
@@ -128,10 +173,10 @@
 
 	async function handleCreateReceipt(data: { name: string; paidBy: string; entries: string; people: string[] }) {
 		if (!group) return;
-		
+
 		try {
 			error = '';
-			
+
 			let entries = [];
 			if (data.entries.trim()) {
 				entries = JSON.parse(data.entries);
@@ -147,6 +192,7 @@
 			};
 
 			await createReceipt(groupId, receiptData);
+			await refreshGroup(); // Refresh UI to show new receipt
 		} catch (err) {
 			error = handleError(err, 'Failed to create receipt');
 		}
@@ -155,15 +201,8 @@
 	function handlePaidByChange(receiptId: number, newValue: string) {
 		if (!group) return;
 		const newPaidBy = newValue.trim() || null;
-		return apiCall(
-			async () => {
-        await updateReceiptPaidBy(receiptId, newPaidBy)
-        const receipt = group?.receipts.find(r => r.id === receiptId);
-        if (receipt) {
-          receipt.paid_by = newPaidBy;
-          group = group;
-        }
-      },
+		return receiptApiCall(
+			() => updateReceiptPaidBy(receiptId, newPaidBy),
 			'Failed to update paid by'
 		);
 	}
@@ -198,14 +237,19 @@
 				newAssignedTo = newAssignedTo.filter(p => p !== person);
 			}
 
-      entry.assigned_to = newAssignedTo;
-      group = group;
+			// Optimistic update
+			entry.assigned_to = newAssignedTo;
+			group = group;
 
-      await updateReceiptEntryDetails(entryId, { assigned_to: newAssignedTo });
+			await updateReceiptEntryDetails(entryId, { assigned_to: newAssignedTo });
+
+			// Fetch group version and update polling store
+			const versionData = await fetchGroupVersion(groupId);
+			pollingStore.updateVersion(versionData.updated_at);
 
 		} catch (err) {
 			error = handleError(err, 'Failed to update assignment');
-			await refreshGroup();
+			await refreshCurrentReceipt(); // Only refresh current receipt on error
 		} finally {
 			updatingEntries.delete(entryId);
 		}
@@ -218,10 +262,10 @@
 
 	async function saveEntry() {
 		if (!editingEntry || !group) return;
-		
+
 		try {
 			const { entryId, field } = editingEntry;
-			
+
 			if (field === 'name') {
 				await updateReceiptEntryDetails(entryId, { name: editingValue.trim() });
 			} else if (field === 'price') {
@@ -231,8 +275,9 @@
 				}
 				await updateReceiptEntryDetails(entryId, { price });
 			}
-			
+
 			cancelEditEntry();
+			await refreshCurrentReceipt(); // Only refresh current receipt
 		} catch (err) {
 			error = handleError(err, 'Failed to update entry');
 		}
@@ -244,14 +289,14 @@
 	}
 
 	function toggleTaxable(entryId: number, currentTaxable: boolean) {
-		return apiCall(
+		return receiptApiCall(
 			() => updateReceiptEntryDetails(entryId, { taxable: !currentTaxable }),
 			'Failed to toggle taxable'
 		);
 	}
 
 	function addNewEntry(receiptId: number) {
-		return apiCall(
+		return receiptApiCall(
 			() => createReceiptEntry(receiptId, { name: 'New Item', price: 0, taxable: false }),
 			'Failed to add new entry'
 		);
@@ -259,16 +304,38 @@
 
 	function removeEntry(entryId: number) {
 		if (!confirm('Delete this item?')) return;
-		return apiCall(
+		return receiptApiCall(
 			() => deleteReceiptEntry(entryId),
 			'Failed to delete entry'
 		);
 	}
 
 	// ============================================================================
+	// Navigation functions
+	// ============================================================================
+
+	function goToPreviousReceipt() {
+		if (canGoLeft) {
+			currentReceiptIndex--;
+		}
+	}
+
+	function goToNextReceipt() {
+		if (canGoRight) {
+			currentReceiptIndex++;
+		}
+	}
+
+	function selectReceipt(index: number) {
+		if (group && index >= 0 && index < group.receipts.length) {
+			currentReceiptIndex = index;
+		}
+	}
+
+	// ============================================================================
 	// Utility functions
 	// ============================================================================
-	
+
 	function handleKeydown(e: KeyboardEvent, saveFunc: () => void, cancelFunc: () => void) {
 		if (e.key === 'Enter') {
 			e.preventDefault();
@@ -282,23 +349,19 @@
 	// ============================================================================
 	// Lifecycle
 	// ============================================================================
-	
-	async function initializeRealtime() {
-		try {
-			realtimeStore.onRefreshGroup = refreshGroup;
-			await realtimeStore.connect(groupId);
-		} catch (err) {
-			console.error('Failed to initialize real-time connection:', err);
-		}
+
+	async function initializePolling() {
+		pollingStore.onGroupChanged = refreshGroup;
+		pollingStore.start(groupId);
 	}
 
 	onMount(async () => {
 		await refreshGroup();
-		// await initializeRealtime();
+		initializePolling();
 	});
 
 	onDestroy(() => {
-		// realtimeStore.disconnect();
+		pollingStore.stop();
 	});
 </script>
 
@@ -329,21 +392,26 @@
 			</button>
 			
 			{#if group}
-				<EditableGroupName 
+				<EditableGroupName
 					{groupId}
 					initialName={group.name}
 					onNameUpdate={handleGroupNameUpdate}
 				/>
-				
-				{#if realtimeStore.isConnected}
+
+				{#if pollingStore.isPolling}
 					<span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full flex items-center space-x-1">
 						<div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
 						<span>Live</span>
 					</span>
-				{:else if realtimeStore.isConnecting}
+				{:else if pollingStore.isPaused}
 					<span class="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full flex items-center space-x-1">
-						<div class="w-2 h-2 bg-yellow-500 rounded-full animate-ping"></div>
-						<span>Connecting...</span>
+						<div class="w-2 h-2 bg-yellow-500 rounded-full"></div>
+						<span>Paused</span>
+					</span>
+				{:else if pollingStore.hasError}
+					<span class="text-xs bg-red-100 text-red-800 px-2 py-1 rounded-full flex items-center space-x-1">
+						<div class="w-2 h-2 bg-red-500 rounded-full"></div>
+						<span>Error</span>
 					</span>
 				{:else}
 					<span class="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded-full">
@@ -421,27 +489,96 @@
 			</div>
 		</div>
 
-		<!-- Bottom Section: Horizontally Scrollable Receipts -->
-		<div class="bg-white rounded-lg shadow-md">
-			<div class="p-6 border-b">
-				<h3 class="text-2xl font-semibold text-gray-700">Receipts</h3>
-			</div>
-			
-			{#if group.receipts.length === 0}
-				<div class="p-12 text-center text-gray-500">
-					<svg class="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-					</svg>
-					<h4 class="text-lg font-medium text-gray-900 mb-2">No receipts found</h4>
-					<p class="text-gray-500">Create a new receipt to get started!</p>
+		<!-- Bottom Section: Receipt List + Receipt Detail + Cost Breakdown -->
+		<div class="grid lg:grid-cols-[300px_1fr_350px] gap-6">
+			<!-- Receipt List (Left Sidebar) -->
+			<div class="bg-white rounded-lg shadow-md overflow-hidden h-[700px] flex flex-col">
+				<div class="p-4 border-b bg-gray-50 flex-shrink-0">
+					<h3 class="text-lg font-semibold text-gray-700">Receipts ({group.receipts.length})</h3>
 				</div>
-			{:else}
-				<div class="p-6">
-					<div class="flex space-x-6 overflow-x-auto pb-4">
-						{#each group.receipts as receipt}
-							<div class="flex-shrink-0 w-[700px] bg-gray-50 border border-gray-200 rounded-lg p-4" style="scroll-snap-align: start;">
-								<!-- Receipt Header -->
-								<div class="flex justify-between items-start mb-4">
+
+				{#if group.receipts.length === 0}
+					<div class="p-8 text-center text-gray-500 flex-1 flex items-center justify-center flex-col">
+						<svg class="w-12 h-12 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+						</svg>
+						<p class="text-sm">No receipts yet</p>
+					</div>
+				{:else}
+					<div class="overflow-y-auto flex-1">
+						{#each group.receipts as receipt, index}
+							<button
+								onclick={() => selectReceipt(index)}
+								class="w-full p-4 text-left border-b hover:bg-gray-50 transition-colors"
+								class:bg-blue-50={currentReceiptIndex === index}
+								class:border-l-4={currentReceiptIndex === index}
+								class:border-l-blue-500={currentReceiptIndex === index}
+							>
+								<div class="flex justify-between items-start mb-1">
+									<h4 class="font-medium text-gray-900 truncate">{receipt.name}</h4>
+									<span
+										class="text-xs px-2 py-0.5 rounded-full flex-shrink-0 ml-2"
+										class:bg-green-100={receipt.processed}
+										class:text-green-800={receipt.processed}
+										class:bg-yellow-100={!receipt.processed}
+										class:text-yellow-800={!receipt.processed}
+									>
+										{receipt.processed ? '✓' : '○'}
+									</span>
+								</div>
+								<p class="text-xs text-gray-500">{new Date(receipt.created_at).toLocaleDateString()}</p>
+								<p class="text-xs text-gray-600 mt-1">{receipt.entries.length} items</p>
+							</button>
+						{/each}
+					</div>
+				{/if}
+			</div>
+
+			<!-- Single Receipt Detail View (Middle) -->
+			<div class="bg-white rounded-lg shadow-md h-[700px] flex flex-col">
+				{#if !hasReceipts}
+					<div class="p-12 text-center text-gray-500 flex-1 flex items-center justify-center flex-col">
+						<svg class="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+						</svg>
+						<h4 class="text-lg font-medium text-gray-900 mb-2">No receipts found</h4>
+						<p class="text-gray-500">Create a new receipt to get started!</p>
+					</div>
+				{:else if currentReceipt}
+					{@const receipt = currentReceipt}
+					<!-- Receipt Navigation Header -->
+					<div class="p-4 border-b bg-gray-50 flex items-center justify-between flex-shrink-0">
+						<button
+							onclick={goToPreviousReceipt}
+							disabled={!canGoLeft}
+							class="p-2 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+							title="Previous receipt"
+						>
+							<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+							</svg>
+						</button>
+
+						<span class="text-sm text-gray-600">
+							Receipt {currentReceiptIndex + 1} of {group.receipts.length}
+						</span>
+
+						<button
+							onclick={goToNextReceipt}
+							disabled={!canGoRight}
+							class="p-2 rounded hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+							title="Next receipt"
+						>
+							<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+							</svg>
+						</button>
+					</div>
+
+					<!-- Receipt Content (Scrollable) -->
+					<div class="p-6 overflow-y-auto flex-1">
+						<!-- Receipt Header -->
+						<div class="flex justify-between items-start mb-4">
 									<div>
 										<h4 class="text-lg font-semibold text-gray-800">{receipt.name}</h4>
 										<p class="text-sm text-gray-500">{new Date(receipt.created_at).toLocaleDateString()}</p>
@@ -617,56 +754,68 @@
 										</table>
 									</div>
 								</div>
+					</div>
+				{/if}
+			</div>
 
-								<!-- Cost Breakdown -->
-								<div class="bg-gradient-to-br from-green-50 to-emerald-50 p-3 rounded-lg border border-green-200">
-									<h5 class="font-medium mb-2 text-gray-700 text-sm">Cost Breakdown</h5>
-									<div class="space-y-1">
-										{#each Object.entries(calculateReceiptCosts(receipt, receipt.people)) as [person, cost]}
-											<div class="flex justify-between items-center text-xs">
-												<div class="flex items-center space-x-1">
-													<span class="font-medium text-xs bg-green-200 text-green-900 w-4 h-4 rounded-full flex items-center justify-center text-[10px]">
-														{getInitials(person)}
-													</span>
-													<span class="text-gray-700">{person}:</span>
-												</div>
-												<span class="font-mono font-semibold text-gray-800">${cost.toFixed(2)}</span>
-											</div>
-										{/each}
-										<div class="border-t border-green-200 pt-1 mt-1 flex justify-between items-center font-semibold text-xs">
-											<span class="text-gray-800">Total:</span>
-											<span class="font-mono text-green-700">
-												${Object.values(calculateReceiptCosts(receipt, receipt.people)).reduce((a, b) => a + b, 0).toFixed(2)}
+			<!-- Cost Breakdown (Right Sidebar) -->
+			<div class="bg-white rounded-lg shadow-md h-[700px] overflow-hidden">
+				{#if currentReceipt}
+					{@const receipt = currentReceipt}
+					<div class="p-4 border-b bg-gray-50">
+						<h3 class="text-lg font-semibold text-gray-700">Cost Breakdown</h3>
+					</div>
+					<div class="p-4 overflow-y-auto h-[calc(700px-60px)]">
+						<div class="bg-gradient-to-br from-green-50 to-emerald-50 p-4 rounded-lg border border-green-200">
+							<h5 class="font-medium mb-3 text-gray-700">Per Person</h5>
+							<div class="space-y-2">
+								{#each Object.entries(calculateReceiptCosts(receipt, receipt.people)) as [person, cost]}
+									<div class="flex justify-between items-center">
+										<div class="flex items-center space-x-2">
+											<span class="font-medium text-xs bg-green-200 text-green-900 w-6 h-6 rounded-full flex items-center justify-center">
+												{getInitials(person)}
 											</span>
+											<span class="text-gray-700 font-medium">{person}</span>
 										</div>
+										<span class="font-mono font-semibold text-gray-800">${cost.toFixed(2)}</span>
 									</div>
-
-									<!-- Payment Status -->
-									{#if receipt.paid_by}
-										<div class="mt-2 pt-2 border-t border-green-200">
-											<p class="text-xs font-medium text-green-800 mb-1">Payments needed:</p>
-											<div class="space-y-0.5">
-												{#each Object.entries(calculateReceiptCosts(receipt, receipt.people)) as [person, owes]}
-													{#if person !== receipt.paid_by && owes > 0}
-														<div class="flex justify-between text-xs">
-															<span class="text-gray-600">{person} → {receipt.paid_by}:</span>
-															<span class="font-mono font-medium text-gray-800">${owes.toFixed(2)}</span>
-														</div>
-													{/if}
-												{/each}
-											</div>
-										</div>
-									{:else}
-										<div class="mt-2 pt-2 border-t border-green-200">
-											<p class="text-xs text-yellow-700">No payment recorded</p>
-										</div>
-									{/if}
+								{/each}
+								<div class="border-t border-green-200 pt-2 mt-2 flex justify-between items-center font-semibold">
+									<span class="text-gray-800">Total:</span>
+									<span class="font-mono text-green-700 text-lg">
+										${Object.values(calculateReceiptCosts(receipt, receipt.people)).reduce((a, b) => a + b, 0).toFixed(2)}
+									</span>
 								</div>
 							</div>
-						{/each}
+						</div>
+
+						<!-- Payment Status -->
+						{#if receipt.paid_by}
+							<div class="mt-4 bg-blue-50 p-4 rounded-lg border border-blue-200">
+								<p class="font-medium text-blue-900 mb-3">Payments Needed</p>
+								<div class="space-y-2">
+									{#each Object.entries(calculateReceiptCosts(receipt, receipt.people)) as [person, owes]}
+										{#if person !== receipt.paid_by && owes > 0}
+											<div class="flex justify-between items-center bg-white p-2 rounded">
+												<span class="text-gray-700 text-sm">{person} → {receipt.paid_by}</span>
+												<span class="font-mono font-semibold text-blue-900">${owes.toFixed(2)}</span>
+											</div>
+										{/if}
+									{/each}
+								</div>
+							</div>
+						{:else}
+							<div class="mt-4 bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+								<p class="text-sm text-yellow-800">No payer assigned</p>
+							</div>
+						{/if}
 					</div>
-				</div>
-			{/if}
+				{:else}
+					<div class="h-full flex items-center justify-center p-8 text-center text-gray-500">
+						<p class="text-sm">Select a receipt to view cost breakdown</p>
+					</div>
+				{/if}
+			</div>
 		</div>
 	{/if}
 
