@@ -296,6 +296,13 @@ async def update_receipt(
         if receipt.paid_by and receipt.paid_by.name not in receipt_update.people:
             receipt.paid_by_id = None
 
+        # Remove any people from entry assigned_to lists who are no longer in receipt people
+        for entry in receipt.entries:
+            entry.assigned_to = [
+                person for person in entry.assigned_to
+                if person.name in receipt_update.people
+            ]
+
     # Update processed status
     if receipt_update.processed is not None:
         receipt.processed = receipt_update.processed
