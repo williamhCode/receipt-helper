@@ -10,6 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from src import models, schemas, crud
+from src.models import Base
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
