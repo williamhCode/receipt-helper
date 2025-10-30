@@ -14,10 +14,6 @@ db_url = os.getenv(
     "DATABASE_URL", "postgresql://williamhou@localhost:5432/receipt_helper"
 )
 
-# For alembic migrations, we need to use the sync driver (psycopg2 instead of asyncpg)
-if db_url.startswith("postgresql+asyncpg://"):
-    db_url = db_url.replace("postgresql+asyncpg://", "postgresql://", 1)
-
 config.set_main_option('sqlalchemy.url', db_url)
 
 # Interpret the config file for Python logging.
