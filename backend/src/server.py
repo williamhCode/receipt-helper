@@ -10,6 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from src import models, schemas, crud
+from src.models import Base
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -31,8 +32,8 @@ app.add_middleware(
 # Database setup
 db_url = os.getenv("DATABASE_URL", "postgresql+asyncpg:///receipt_helper")
 
-# if db_url.startswith("postgres://"):
-#     db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
 
 engine = create_async_engine(db_url, pool_pre_ping=True)
 
