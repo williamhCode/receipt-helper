@@ -461,26 +461,26 @@
 			</div>
 
 			<!-- Combined Cost Breakdown -->
-			<div class="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-lg border border-blue-200">
-				<h3 class="text-2xl font-semibold text-gray-700 mb-4">Combined Balance</h3>
-				<div class="grid grid-cols-1 gap-3">
+			<div class="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-lg border border-blue-200 h-[300px] flex flex-col">
+				<h3 class="text-2xl font-semibold text-gray-700 mb-4 flex-shrink-0">Combined Balance</h3>
+				<div class="flex flex-wrap overflow-y-auto flex-1 -m-1.5 content-start">
 					{#each Object.entries(calculateCombinedCosts(group)) as [person, amount]}
-						<div class="bg-white p-3 rounded-lg shadow-sm">
+						<div class="w-full sm:w-[calc(50%-0.75rem)] m-1.5 bg-white p-3 rounded-lg shadow-sm max-h-20">
 							<div class="flex justify-between items-center">
 								<div class="flex items-center space-x-2">
-									<span class="font-medium text-xs bg-blue-200 text-blue-900 w-7 h-6 rounded-full flex items-center justify-center">
+									<span class="font-medium text-xs bg-blue-200 text-blue-900 w-7 h-7 rounded-full flex items-center justify-center">
 										{getInitials(person)}
 									</span>
 									<span class="font-medium text-lg text-gray-700">{person}:</span>
 								</div>
-								<span class="font-mono font-semibold" 
-									class:text-green-600={amount < 0} 
-									class:text-red-600={amount > 0} 
+								<span class="font-mono font-semibold text-xl"
+									class:text-green-600={amount < 0}
+									class:text-red-600={amount > 0}
 									class:text-gray-800={amount === 0}>
 									{amount < 0 ? '+' : ''}{Math.abs(amount).toFixed(2)}
 								</span>
 							</div>
-							<div class="text-sm text-gray-500 mt-1 ml-8">
+							<div class="text-sm text-gray-500 mt-1 ml-9">
 								{amount < 0 ? 'Is owed' : amount > 0 ? 'Owes' : 'Even'}
 							</div>
 						</div>
@@ -490,9 +490,9 @@
 		</div>
 
 		<!-- Bottom Section: Receipt List + Receipt Detail + Cost Breakdown -->
-		<div class="grid lg:grid-cols-[300px_1fr_350px] gap-6">
+		<div class="grid lg:grid-cols-[minmax(200px,250px)_minmax(400px,1fr)_minmax(250px,300px)] gap-6">
 			<!-- Receipt List (Left Sidebar) -->
-			<div class="bg-white rounded-lg shadow-md overflow-hidden h-[700px] flex flex-col">
+			<div class="bg-white rounded-lg shadow-md overflow-hidden h-[900px] flex flex-col">
 				<div class="p-4 border-b bg-gray-50 flex-shrink-0">
 					<h3 class="text-lg font-semibold text-gray-700">Receipts ({group.receipts.length})</h3>
 				</div>
@@ -535,7 +535,7 @@
 			</div>
 
 			<!-- Single Receipt Detail View (Middle) -->
-			<div class="bg-white rounded-lg shadow-md h-[700px] flex flex-col">
+			<div class="bg-white rounded-lg shadow-md h-[900px] flex flex-col">
 				{#if !hasReceipts}
 					<div class="p-12 text-center text-gray-500 flex-1 flex items-center justify-center flex-col">
 						<svg class="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -759,13 +759,13 @@
 			</div>
 
 			<!-- Cost Breakdown (Right Sidebar) -->
-			<div class="bg-white rounded-lg shadow-md h-[700px] overflow-hidden">
+			<div class="bg-white rounded-lg shadow-md h-[900px] overflow-hidden">
 				{#if currentReceipt}
 					{@const receipt = currentReceipt}
 					<div class="p-4 border-b bg-gray-50">
 						<h3 class="text-lg font-semibold text-gray-700">Cost Breakdown</h3>
 					</div>
-					<div class="p-4 overflow-y-auto h-[calc(700px-60px)]">
+					<div class="p-4 overflow-y-auto h-[calc(900px-60px)]">
 						<div class="bg-gradient-to-br from-green-50 to-emerald-50 p-4 rounded-lg border border-green-200">
 							<h5 class="font-medium mb-3 text-gray-700">Per Person</h5>
 							<div class="space-y-2">
@@ -782,7 +782,7 @@
 								{/each}
 								<div class="border-t border-green-200 pt-2 mt-2 flex justify-between items-center font-semibold">
 									<span class="text-gray-800">Total:</span>
-									<span class="font-mono text-green-700 text-lg">
+									<span class="font-mono text-green-700">
 										${Object.values(calculateReceiptCosts(receipt, receipt.people)).reduce((a, b) => a + b, 0).toFixed(2)}
 									</span>
 								</div>
