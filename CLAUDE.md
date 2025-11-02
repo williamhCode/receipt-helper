@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Receipt Helper is a full-stack web application for splitting expenses among groups. Users create groups with members, add receipts with line items, and the app calculates who owes what based on tax rates and item assignments.
 
 **Tech Stack:**
-- **Backend**: FastAPI (Python) + SQLAlchemy (async) + PostgreSQL/SQLite + WebSockets for real-time updates
+- **Backend**: FastAPI (Python) + SQLAlchemy (async) + PostgreSQL/SQLite
 - **Frontend**: SvelteKit (Svelte 5 with runes) + TypeScript + TailwindCSS v4
 - **Database Migrations**: Alembic
 
@@ -79,13 +79,13 @@ The frontend dev server runs on port 5173 by default.
 - Uses Pydantic schemas (schemas.py) for request/response validation
 - Dependency injection pattern for database sessions via `SessionDep`
 
-**Real-time Updates** (backend/src/websocket_manager.py):
-- WebSocket connections at `/ws/groups/{group_id}` (currently commented out in server.py)
-- ConnectionManager handles group-scoped broadcasts with debouncing (2s buffer)
-- Clients receive `refresh_group` messages to trigger UI updates
+**Change Detection**:
+- Lightweight polling endpoint `/groups/{group_id}/version` returns just the `updated_at` timestamp for detecting changes
+- Automatic timestamp propagation: Event listeners in models.py update parent Group's `updated_at` whenever People, Receipts, or ReceiptEntries are modified (see models.py:187-245)
 
 **Database Configuration**:
 - Uses `DATABASE_URL` environment variable (defaults to `postgresql+asyncpg:///receipt_helper`)
+- **Important**: Alembic's env.py has its own default fallback: `postgresql://williamhou@localhost:5432/receipt_helper`
 - Alembic handles schema migrations (see `backend/alembic/`)
 
 ### Frontend Architecture
@@ -96,7 +96,6 @@ The frontend dev server runs on port 5173 by default.
 - `frontend/src/lib/api.ts`: Centralized API client with typed request functions
 - `frontend/src/lib/utils.ts`: Calculation logic for receipt totals, split costs, tax (7% rate)
 - `frontend/src/lib/types.ts`: TypeScript interfaces matching backend schemas
-- `frontend/src/lib/stores/realtime.svelte.ts`: WebSocket manager for live updates (uses Svelte 5 runes)
 
 **Routes**:
 - `/`: List all groups (frontend/src/routes/+page.svelte)
@@ -107,8 +106,7 @@ The frontend dev server runs on port 5173 by default.
 - Uses inline Tailwind classes (TailwindCSS v4 with Vite plugin)
 
 **State Management**:
-- Uses Svelte 5 runes (`$state`) for component-local state
-- `RealtimeStore` class for WebSocket connection state management
+- Uses Svelte 5 runes (`$state`, `$derived`) for component-local state
 - No global state management library needed
 
 **API Communication**:
@@ -119,7 +117,7 @@ The frontend dev server runs on port 5173 by default.
 
 1. **Receipt Creation**: Frontend sends receipt data with person names as strings → Backend's `crud.create_receipt` resolves/creates Person records → Returns fully populated Receipt with entries
 2. **Cost Calculation**: Frontend calculates splits client-side using `utils.ts::calculateReceiptCosts` (split equally or by assignment)
-3. **Real-time Sync**: WebSocket broadcasts trigger `onRefreshGroup` callback → Components refetch group data → UI updates
+3. **Change Detection**: Use `/groups/{group_id}/version` endpoint to poll for updates → Compare `updated_at` timestamp → Refetch group data if changed
 
 ### Important Conventions
 
@@ -132,9 +130,9 @@ The frontend dev server runs on port 5173 by default.
 
 - Don't mix async/sync SQLAlchemy patterns - this codebase is fully async
 - When adding new Person-related fields, update both the association tables and the get-or-create logic in `crud.py`
-- WebSocket endpoints are currently commented out - they exist but need to be re-enabled if real-time features are needed
-- Frontend uses Svelte 5 runes syntax, not the older stores API
-- Database migrations must be run manually after model changes
+- Frontend uses Svelte 5 runes syntax, not the older stores API (`$state`, `$derived`, not writable/readable stores)
+- Database migrations must be run manually after model changes (`alembic upgrade head`)
+- Event listeners automatically cascade updates to Group.updated_at - don't manually update timestamps unless bypassing ORM
 
 ### Environment Variables
 
