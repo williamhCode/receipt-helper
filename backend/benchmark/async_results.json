@@ -1,0 +1,102 @@
+{
+  "timestamp": "2025-11-02T19:01:48.847057",
+  "tests": [
+    {
+      "name": "GET / (health check)",
+      "iterations": 50,
+      "errors": 0,
+      "min_ms": 2.7795410715043545,
+      "max_ms": 5.556374788284302,
+      "mean_ms": 4.280999870970845,
+      "median_ms": 4.270917037501931,
+      "p95_ms": 5.134790670126677,
+      "p99_ms": 5.556374788284302
+    },
+    {
+      "name": "GET /groups/ (list groups)",
+      "iterations": 50,
+      "errors": 0,
+      "min_ms": 9.31999972090125,
+      "max_ms": 12.115916702896357,
+      "mean_ms": 10.334927458316088,
+      "median_ms": 10.1263124961406,
+      "p95_ms": 11.610582936555147,
+      "p99_ms": 12.115916702896357
+    },
+    {
+      "name": "POST /groups/ (create group with 3 people)",
+      "iterations": 50,
+      "errors": 0,
+      "min_ms": 8.729374967515469,
+      "max_ms": 26.656624861061573,
+      "mean_ms": 10.869290037080646,
+      "median_ms": 10.448146378621459,
+      "p95_ms": 11.909957975149155,
+      "p99_ms": 26.656624861061573
+    },
+    {
+      "name": "GET /groups/128 (fetch group with relationships)",
+      "iterations": 50,
+      "errors": 0,
+      "min_ms": 6.5692090429365635,
+      "max_ms": 14.957041013985872,
+      "mean_ms": 7.534070052206516,
+      "median_ms": 7.450520992279053,
+      "p95_ms": 8.015333209186792,
+      "p99_ms": 14.957041013985872
+    },
+    {
+      "name": "POST /receipts/ (create receipt with 3 entries)",
+      "iterations": 30,
+      "errors": 0,
+      "min_ms": 21.465084049850702,
+      "max_ms": 39.47991691529751,
+      "mean_ms": 26.132918195798993,
+      "median_ms": 24.95118766091764,
+      "p95_ms": 31.32512466982007,
+      "p99_ms": 39.47991691529751
+    },
+    {
+      "name": "GET /groups/ (concurrent) (concurrent=10)",
+      "iterations": 50,
+      "concurrent": 10,
+      "errors": 0,
+      "total_time_ms": 635.4390406049788,
+      "requests_per_second": 78.68575395115288,
+      "min_ms": 55.127291940152645,
+      "max_ms": 212.22754195332527,
+      "mean_ms": 120.85374237969518,
+      "median_ms": 118.056186940521,
+      "p95_ms": 186.29058403894305,
+      "p99_ms": 212.22754195332527
+    },
+    {
+      "name": "GET /groups/128 (concurrent) (concurrent=10)",
+      "iterations": 50,
+      "concurrent": 10,
+      "errors": 0,
+      "total_time_ms": 410.389750264585,
+      "requests_per_second": 121.83540151225556,
+      "min_ms": 52.88324970752001,
+      "max_ms": 110.34233262762427,
+      "mean_ms": 77.43875587359071,
+      "median_ms": 70.46472909860313,
+      "p95_ms": 102.82858368009329,
+      "p99_ms": 110.34233262762427
+    },
+    {
+      "name": "Mixed read/write operations (concurrent) (concurrent=10)",
+      "iterations": 60,
+      "concurrent": 10,
+      "errors": 0,
+      "total_time_ms": 596.0439592599869,
+      "requests_per_second": 100.66371627101543,
+      "min_ms": 56.36570882052183,
+      "max_ms": 139.89491714164615,
+      "mean_ms": 95.85143332369626,
+      "median_ms": 95.34689621068537,
+      "p95_ms": 122.50216584652662,
+      "p99_ms": 139.89491714164615
+    }
+  ]
+}
