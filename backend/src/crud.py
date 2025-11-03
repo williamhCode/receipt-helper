@@ -1,25 +1,25 @@
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 from sqlalchemy import select
 from src.models import Person, Receipt, ReceiptEntry
 
 
-async def get_or_create_person(db: AsyncSession, group_id: int, name: str):
+def get_or_create_person(db: Session, group_id: int, name: str):
     stmt = select(Person).where(
         Person.name == name,
         Person.group_id == group_id
     )
-    result = await db.execute(stmt)
+    result = db.execute(stmt)
     person = result.scalars().first()
-    
+
     if not person:
         person = Person(name=name, group_id=group_id)
         db.add(person)
-        await db.flush()
-    
+        db.flush()
+
     return person
 
 
-async def get_or_create_people(db: AsyncSession, group_id: int, names: list[str]):
+def get_or_create_people(db: Session, group_id: int, names: list[str]):
     if not names:
         return []
 
@@ -27,7 +27,7 @@ async def get_or_create_people(db: AsyncSession, group_id: int, names: list[str]
         Person.group_id == group_id,
         Person.name.in_(names)
     )
-    result = await db.execute(stmt)
+    result = db.execute(stmt)
     existing_people = {person.name: person for person in result.scalars().all()}
 
     people = []
@@ -41,13 +41,13 @@ async def get_or_create_people(db: AsyncSession, group_id: int, names: list[str]
             people.append(new_person)
 
     if people:
-        await db.flush()
+        db.flush()
 
     return people
 
 
-async def create_receipt(
-    db: AsyncSession,
+def create_receipt(
+    db: Session,
     group_id: int,
     name: str,
     paid_by_name: str | None = None,
@@ -64,18 +64,18 @@ async def create_receipt(
     )
 
     if paid_by_name:
-        paid_by = await get_or_create_person(db, group_id, paid_by_name)
+        paid_by = get_or_create_person(db, group_id, paid_by_name)
         receipt.paid_by_id = paid_by.id
 
-    receipt.people = await get_or_create_people(db, group_id, people_names)
+    receipt.people = get_or_create_people(db, group_id, people_names)
 
     db.add(receipt)
-    await db.flush()
+    db.flush()
     return receipt
 
 
-async def create_receipt_entry(
-    db: AsyncSession,
+def create_receipt_entry(
+    db: Session,
     receipt: Receipt,
     name: str,
     price: float,
@@ -90,8 +90,8 @@ async def create_receipt_entry(
         taxable=taxable,
     )
 
-    entry.assigned_to = await get_or_create_people(db, receipt.group_id, assigned_to_names)
+    entry.assigned_to = get_or_create_people(db, receipt.group_id, assigned_to_names)
 
     db.add(entry)
-    await db.flush()
+    db.flush()
     return entry

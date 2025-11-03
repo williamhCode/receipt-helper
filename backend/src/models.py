@@ -1,6 +1,5 @@
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Table
 from sqlalchemy import func, event
 
@@ -8,7 +7,7 @@ from datetime import datetime
 import base64, uuid
 
 
-class Base(DeclarativeBase, AsyncAttrs):
+class Base(DeclarativeBase):
     pass
 
 
@@ -51,8 +50,7 @@ class Group(Base):
     people: Mapped[list["Person"]] = relationship(
         back_populates="group",
         cascade="all, delete-orphan",
-        order_by="Person.id",
-        lazy="selectin"
+        order_by="Person.id"
     )
     
     # One-to-many: A group has many receipts
@@ -132,18 +130,16 @@ class Receipt(Base):
     group: Mapped[Group] = relationship(back_populates="receipts")
     
     paid_by: Mapped[Person | None] = relationship(
-        "Person", 
-        foreign_keys=[paid_by_id], 
-        back_populates="paid_receipts",
-        lazy="selectin"
+        "Person",
+        foreign_keys=[paid_by_id],
+        back_populates="paid_receipts"
     )
 
     # Many-to-many: Receipt can involve multiple people (all must be in same group)
     people: Mapped[list[Person]] = relationship(
-        secondary=receipt_person_association, 
+        secondary=receipt_person_association,
         back_populates="receipts",
-        order_by="Person.id",
-        lazy="selectin"
+        order_by="Person.id"
     )
 
     # One-to-many: Receipt has many entries
@@ -179,8 +175,7 @@ class ReceiptEntry(Base):
     assigned_to: Mapped[list[Person]] = relationship(
         secondary=receipt_entry_person_association,
         back_populates="assigned_entries",
-        order_by="Person.id",
-        lazy="selectin"
+        order_by="Person.id"
     )
 
 

@@ -2,9 +2,8 @@ from typing import Annotated
 import os
 import logging
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, create_engine
+from sqlalchemy.orm import Session
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,21 +29,18 @@ app.add_middleware(
 )
 
 # Database setup
-db_url = os.getenv("DATABASE_URL", "postgresql+asyncpg:///receipt_helper")
+db_url = os.getenv("DATABASE_URL", "postgresql:///receipt_helper")
 
-if db_url.startswith("postgresql://"):
-    db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-
-engine = create_async_engine(db_url, pool_pre_ping=True)
+engine = create_engine(db_url, pool_pre_ping=True)
 
 
 # Dependency
-async def get_session():
-    async with AsyncSession(engine, expire_on_commit=False) as session:
+def get_session():
+    with Session(engine, expire_on_commit=False) as session:
         yield session
 
 
-SessionDep = Annotated[AsyncSession, Depends(get_session)]
+SessionDep = Annotated[Session, Depends(get_session)]
 
 
 # ============================================================================
@@ -62,13 +58,13 @@ def root():
 # ============================================================================
 
 @app.post("/groups/", response_model=schemas.Group)
-async def create_group(group: schemas.GroupCreate, db: SessionDep):
+def create_group(group: schemas.GroupCreate, db: SessionDep):
     db_group = models.Group(
         key_hash="placeholder_hash",
         name=group.name or "",
     )
     db.add(db_group)
-    await db.flush()
+    db.flush()
 
     if not db_group.name:
         db_group.name = f"Group {db_group.id}"
@@ -77,39 +73,23 @@ async def create_group(group: schemas.GroupCreate, db: SessionDep):
         person = models.Person(name=person_name, group_id=db_group.id)
         db.add(person)
 
-    await db.commit()
+    db.commit()
+    db.refresh(db_group)
 
-    stmt = (
-        select(models.Group)
-        .where(models.Group.id == db_group.id)
-        .options(
-            selectinload(models.Group.receipts).selectinload(models.Receipt.entries)
-        )
-    )
-    result_group = (await db.scalars(stmt)).first()
-
-    return result_group
+    return db_group
 
 
 @app.get("/groups/", response_model=list[schemas.Group])
-async def get_groups(db: SessionDep):
-    stmt = select(models.Group).options(
-        selectinload(models.Group.receipts).selectinload(models.Receipt.entries)
-    )
-    groups = (await db.scalars(stmt)).all()
+def get_groups(db: SessionDep):
+    stmt = select(models.Group)
+    groups = db.scalars(stmt).all()
     return groups
 
 
 @app.get("/groups/{group_id}", response_model=schemas.Group)
-async def get_group(group_id: int, db: SessionDep):
-    stmt = (
-        select(models.Group)
-        .where(models.Group.id == group_id)
-        .options(
-            selectinload(models.Group.receipts).selectinload(models.Receipt.entries)
-        )
-    )
-    group = (await db.scalars(stmt)).first()
+def get_group(group_id: int, db: SessionDep):
+    stmt = select(models.Group).where(models.Group.id == group_id)
+    group = db.scalars(stmt).first()
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
@@ -117,14 +97,14 @@ async def get_group(group_id: int, db: SessionDep):
 
 
 @app.get("/groups/{group_id}/version")
-async def get_group_version(group_id: int, db: SessionDep):
+def get_group_version(group_id: int, db: SessionDep):
     """Lightweight endpoint to check if group has been updated.
 
     Returns the last update timestamp for efficient polling.
     Clients can poll this endpoint to detect changes without fetching full group data.
     """
     stmt = select(models.Group.updated_at).where(models.Group.id == group_id)
-    result = await db.execute(stmt)
+    result = db.execute(stmt)
     updated_at = result.scalar_one_or_none()
 
     if updated_at is None:
@@ -137,15 +117,9 @@ async def get_group_version(group_id: int, db: SessionDep):
 
 
 @app.patch("/groups/{group_id}", response_model=schemas.Group)
-async def update_group(group_id: int, group_update: schemas.GroupUpdate, db: SessionDep):
-    stmt = (
-        select(models.Group)
-        .where(models.Group.id == group_id)
-        .options(
-            selectinload(models.Group.receipts).selectinload(models.Receipt.entries)
-        )
-    )
-    group = (await db.scalars(stmt)).first()
+def update_group(group_id: int, group_update: schemas.GroupUpdate, db: SessionDep):
+    stmt = select(models.Group).where(models.Group.id == group_id)
+    group = db.scalars(stmt).first()
 
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -154,22 +128,22 @@ async def update_group(group_id: int, group_update: schemas.GroupUpdate, db: Ses
         group.name = group_update.name
 
     if group_update.people is not None:
-        group.people = await crud.get_or_create_people(db, group_id, group_update.people)
+        group.people = crud.get_or_create_people(db, group_id, group_update.people)
 
-    await db.commit()
-    await db.refresh(group)
+    db.commit()
+    db.refresh(group)
 
     return group
 
 
 @app.delete("/groups/{group_id}")
-async def delete_group(group_id: int, db: SessionDep):
-    group = await db.get(models.Group, group_id)
+def delete_group(group_id: int, db: SessionDep):
+    group = db.get(models.Group, group_id)
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    await db.delete(group)
-    await db.commit()
+    db.delete(group)
+    db.commit()
 
     return {"message": "Group deleted successfully", "id": group.id}
 
@@ -179,8 +153,8 @@ async def delete_group(group_id: int, db: SessionDep):
 # ============================================================================
 
 @app.get("/groups/{group_id}/people/", response_model=list[schemas.Person])
-async def get_group_people(group_id: int, db: SessionDep):
-    result = await db.execute(
+def get_group_people(group_id: int, db: SessionDep):
+    result = db.execute(
         select(models.Person).where(models.Person.group_id == group_id)
     )
     people = result.scalars().all()
@@ -188,14 +162,14 @@ async def get_group_people(group_id: int, db: SessionDep):
 
 
 @app.patch("/people/{person_id}", response_model=schemas.Person)
-async def update_person(person_id: int, person_update: schemas.PersonUpdate, db: SessionDep):
+def update_person(person_id: int, person_update: schemas.PersonUpdate, db: SessionDep):
     """Update a person's name (within their group)"""
-    person = await db.get(models.Person, person_id)
+    person = db.get(models.Person, person_id)
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
 
     # Check if name already exists in the same group
-    result = await db.execute(
+    result = db.execute(
         select(models.Person).where(
             models.Person.name == person_update.name,
             models.Person.group_id == person.group_id,
@@ -211,8 +185,8 @@ async def update_person(person_id: int, person_update: schemas.PersonUpdate, db:
         )
 
     person.name = person_update.name
-    await db.commit()
-    await db.refresh(person)
+    db.commit()
+    db.refresh(person)
 
     return person
 
@@ -222,13 +196,13 @@ async def update_person(person_id: int, person_update: schemas.PersonUpdate, db:
 # ============================================================================
 
 @app.post("/groups/{group_id}/receipts/", response_model=schemas.Receipt)
-async def create_receipt(group_id: int, receipt_data: schemas.ReceiptCreate, db: SessionDep):
-    group = await db.get(models.Group, group_id)
+def create_receipt(group_id: int, receipt_data: schemas.ReceiptCreate, db: SessionDep):
+    group = db.get(models.Group, group_id)
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
     # Use CRUD helper to create receipt
-    db_receipt = await crud.create_receipt(
+    db_receipt = crud.create_receipt(
         db=db,
         group_id=group_id,
         name=receipt_data.name,
@@ -240,7 +214,7 @@ async def create_receipt(group_id: int, receipt_data: schemas.ReceiptCreate, db:
 
     # Create entries
     for entry_data in receipt_data.entries:
-        await crud.create_receipt_entry(
+        crud.create_receipt_entry(
             db=db,
             receipt=db_receipt,
             name=entry_data.name,
@@ -249,23 +223,16 @@ async def create_receipt(group_id: int, receipt_data: schemas.ReceiptCreate, db:
             assigned_to_names=entry_data.assigned_to,
         )
 
-    await db.commit()
-
-    # Reload receipt with all relationships loaded
-    stmt = select(models.Receipt).where(models.Receipt.id == db_receipt.id).options(
-        selectinload(models.Receipt.entries)
-    )
-    db_receipt = (await db.scalars(stmt)).first()
+    db.commit()
+    db.refresh(db_receipt)
 
     return db_receipt
 
 
 @app.get("/receipts/{receipt_id}", response_model=schemas.Receipt)
-async def get_receipt(receipt_id: int, db: SessionDep):
-    stmt = select(models.Receipt).where(models.Receipt.id == receipt_id).options(
-        selectinload(models.Receipt.entries)
-    )
-    receipt = (await db.scalars(stmt)).first()
+def get_receipt(receipt_id: int, db: SessionDep):
+    stmt = select(models.Receipt).where(models.Receipt.id == receipt_id)
+    receipt = db.scalars(stmt).first()
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
 
@@ -273,23 +240,19 @@ async def get_receipt(receipt_id: int, db: SessionDep):
 
 
 @app.patch("/receipts/{receipt_id}", response_model=schemas.Receipt)
-async def update_receipt(
+def update_receipt(
     receipt_id: int, receipt_update: schemas.ReceiptUpdate, db: SessionDep
 ):
     """Update receipt details"""
-    stmt = (
-        select(models.Receipt)
-        .where(models.Receipt.id == receipt_id)
-        .options(selectinload(models.Receipt.entries))
-    )
-    receipt = (await db.scalars(stmt)).first()
+    stmt = select(models.Receipt).where(models.Receipt.id == receipt_id)
+    receipt = db.scalars(stmt).first()
 
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
 
     # Update people
     if receipt_update.people is not None:
-        receipt.people = await crud.get_or_create_people(
+        receipt.people = crud.get_or_create_people(
             db, receipt.group_id, receipt_update.people
         )
 
@@ -317,33 +280,28 @@ async def update_receipt(
         receipt.paid_by_id = None
     elif receipt_update.paid_by is not None:
         if receipt_update.paid_by:
-            paid_by = await crud.get_or_create_person(
+            paid_by = crud.get_or_create_person(
                 db, receipt.group_id, receipt_update.paid_by
             )
             receipt.paid_by_id = paid_by.id
         else:
             receipt.paid_by_id = None
 
-    await db.commit()
-
-    # Reload receipt with entries
-    stmt = select(models.Receipt).where(models.Receipt.id == receipt_id).options(
-        selectinload(models.Receipt.entries)
-    )
-    receipt = (await db.scalars(stmt)).first()
+    db.commit()
+    db.refresh(receipt)
 
     return receipt
 
 
 @app.delete("/receipts/{receipt_id}")
-async def delete_receipt(receipt_id: int, db: SessionDep):
+def delete_receipt(receipt_id: int, db: SessionDep):
     """Delete a receipt and all its entries (CASCADE)"""
-    receipt = await db.get(models.Receipt, receipt_id)
+    receipt = db.get(models.Receipt, receipt_id)
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
 
-    await db.delete(receipt)
-    await db.commit()
+    db.delete(receipt)
+    db.commit()
 
     return {"message": "Receipt deleted successfully", "id": receipt_id}
 
@@ -353,16 +311,16 @@ async def delete_receipt(receipt_id: int, db: SessionDep):
 # ============================================================================
 
 @app.post("/receipts/{receipt_id}/entries/", response_model=schemas.ReceiptEntry)
-async def create_receipt_entry(
+def create_receipt_entry(
     receipt_id: int, entry_data: schemas.ReceiptEntryCreate, db: SessionDep
 ):
     """Create a new entry for a receipt"""
-    receipt = await db.get(models.Receipt, receipt_id)
+    receipt = db.get(models.Receipt, receipt_id)
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
 
     # Use CRUD helper
-    db_entry = await crud.create_receipt_entry(
+    db_entry = crud.create_receipt_entry(
         db=db,
         receipt=receipt,
         name=entry_data.name,
@@ -371,28 +329,24 @@ async def create_receipt_entry(
         assigned_to_names=entry_data.assigned_to,
     )
 
-    await db.commit()
-    await db.refresh(db_entry)
+    db.commit()
+    db.refresh(db_entry)
 
     return db_entry
 
 
 @app.patch("/receipt-entries/{entry_id}", response_model=schemas.ReceiptEntry)
-async def update_receipt_entry(
+def update_receipt_entry(
     entry_id: int, update_data: schemas.ReceiptEntryUpdate, db: SessionDep
 ):
-    stmt = (
-        select(models.ReceiptEntry)
-        .where(models.ReceiptEntry.id == entry_id)
-        .options(selectinload(models.ReceiptEntry.assigned_to), selectinload(models.ReceiptEntry.receipt))
-    )
-    entry = (await db.scalars(stmt)).first()
+    stmt = select(models.ReceiptEntry).where(models.ReceiptEntry.id == entry_id)
+    entry = db.scalars(stmt).first()
 
     if not entry:
         raise HTTPException(status_code=404, detail="Receipt entry not found")
 
     if update_data.assigned_to is not None:
-        entry.assigned_to = await crud.get_or_create_people(
+        entry.assigned_to = crud.get_or_create_people(
             db, entry.receipt.group_id, update_data.assigned_to
         )
 
@@ -407,20 +361,20 @@ async def update_receipt_entry(
     if update_data.taxable is not None:
         entry.taxable = update_data.taxable
 
-    await db.commit()
-    await db.refresh(entry)
+    db.commit()
+    db.refresh(entry)
 
     return entry
 
 
 @app.delete("/receipt-entries/{entry_id}")
-async def delete_receipt_entry(entry_id: int, db: SessionDep):
+def delete_receipt_entry(entry_id: int, db: SessionDep):
     """Delete a receipt entry"""
-    entry = await db.get(models.ReceiptEntry, entry_id)
+    entry = db.get(models.ReceiptEntry, entry_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Receipt entry not found")
 
-    await db.delete(entry)
-    await db.commit()
+    db.delete(entry)
+    db.commit()
 
     return {"message": "Entry deleted successfully", "id": entry_id}
