@@ -1,5 +1,6 @@
 import os
 import uvicorn
+from src.server import app  # Export app for Railway/production
 
 if __name__ == "__main__":
     port = os.getenv("PORT")
