@@ -38,7 +38,7 @@ Return ONLY valid JSON with this exact structure (no markdown, no explanations):
   "merchant_name": "store or restaurant name",
   "receipt_date": "YYYY-MM-DD format or null if not found",
   "items": [
-    {"name": "item description", "price": 0.00, "taxable": true}
+    {"name": "item description", "price": item price number, "taxable": true or false}
   ],
   "confidence": "high"
 }
@@ -48,8 +48,6 @@ Instructions:
 - Set taxable individually based on if the item should be taxed
 - Use null for receipt_date if the date is unclear or not visible
 - Set confidence to "low" if: this is not a receipt, the image is too blurry to read, or critical data is missing
-- Generate a descriptive merchant_name even if only a logo is visible (infer from context)
-- Prices should be item prices before tax
 
 Return the JSON now:"""
 

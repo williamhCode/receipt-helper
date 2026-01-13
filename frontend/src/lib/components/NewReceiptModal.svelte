@@ -111,7 +111,7 @@
 </script>
 
 {#if show}
-	<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+	<div class="fixed inset-0 flex items-center bg-black/50 justify-center p-4 z-50">
 		<div class="bg-white rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
 			<h3 class="text-lg font-semibold text-gray-800 mb-4">Create New Receipt</h3>
 
