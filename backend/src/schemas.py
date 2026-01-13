@@ -103,6 +103,7 @@ class ReceiptUpdate(BaseModel):
     processed: bool | None = None
     paid_by: str | None = None
     people: list[str] | None = None
+    created_at: str | None = None  # ISO format date string (YYYY-MM-DD)
 
 
 # receipt entry ---------------------------------------

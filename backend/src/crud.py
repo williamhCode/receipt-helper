@@ -54,6 +54,7 @@ async def create_receipt(
     people_names: list[str] = [],
     processed: bool = False,
     raw_data: str | None = None,
+    created_at: str | None = None,
 ) -> Receipt:
 
     receipt = Receipt(
@@ -62,6 +63,11 @@ async def create_receipt(
         processed=processed,
         raw_data=raw_data,
     )
+
+    # Set custom creation date if provided (for scanned receipts)
+    if created_at:
+        from datetime import datetime
+        receipt.created_at = datetime.fromisoformat(created_at)
 
     if paid_by_name:
         paid_by = await get_or_create_person(db, group_id, paid_by_name)

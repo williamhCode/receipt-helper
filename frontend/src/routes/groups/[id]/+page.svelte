@@ -42,6 +42,8 @@
 	let editingValue = $state('');
 	let updatingEntries = $state(new Set<number>());
 	let currentReceiptIndex = $state(0);
+	let editingReceipt = $state<{ receiptId: number; field: 'name' | 'date' } | null>(null);
+	let editingReceiptValue = $state('');
 
 	const groupId = $derived(parseInt($page.params.id));
 	const currentReceipt = $derived(group?.receipts[currentReceiptIndex] ?? null);
@@ -205,6 +207,48 @@
 			() => updateReceiptPaidBy(receiptId, newPaidBy),
 			'Failed to update paid by'
 		);
+	}
+
+	function startEditingReceipt(receiptId: number, field: 'name' | 'date') {
+		if (!currentReceipt) return;
+		editingReceipt = { receiptId, field };
+		if (field === 'name') {
+			editingReceiptValue = currentReceipt.name;
+		} else {
+			// Extract date from ISO datetime string (YYYY-MM-DD)
+			editingReceiptValue = currentReceipt.created_at.split('T')[0];
+		}
+	}
+
+	async function saveReceiptEdit() {
+		if (!editingReceipt || !currentReceipt) return;
+
+		const { receiptId, field } = editingReceipt;
+		const value = editingReceiptValue.trim();
+
+		if (!value) {
+			editingReceipt = null;
+			return;
+		}
+
+		try {
+			error = '';
+			if (field === 'name') {
+				await updateReceipt(receiptId, { name: value });
+			} else {
+				// Update created_at with the date
+				await updateReceipt(receiptId, { created_at: value });
+			}
+			await refreshCurrentReceipt();
+			editingReceipt = null;
+		} catch (err) {
+			error = handleError(err, `Failed to update receipt ${field}`);
+		}
+	}
+
+	function cancelReceiptEdit() {
+		editingReceipt = null;
+		editingReceiptValue = '';
 	}
 
 	function removeReceipt(receiptId: number, receiptName: string) {
@@ -578,10 +622,53 @@
 					<!-- Receipt Content (Scrollable) -->
 					<div class="p-6 overflow-y-auto flex-1">
 						<!-- Receipt Header -->
-						<div class="flex justify-between items-start mb-4">
-									<div>
-										<h4 class="text-lg font-semibold text-gray-800">{receipt.name}</h4>
-										<p class="text-sm text-gray-500">{new Date(receipt.created_at).toLocaleDateString()}</p>
+						<div class="flex justify-between items-center mb-4">
+									<div class="flex-1 flex flex-col justify-center gap-0.5">
+										<!-- Receipt Name (Editable) -->
+										{#if editingReceipt && editingReceipt.receiptId === receipt.id && editingReceipt.field === 'name'}
+											<input
+												type="text"
+												bind:value={editingReceiptValue}
+												onblur={saveReceiptEdit}
+												onkeydown={(e) => {
+													if (e.key === 'Enter') saveReceiptEdit();
+													if (e.key === 'Escape') cancelReceiptEdit();
+												}}
+												class="text-lg font-semibold text-gray-800 border border-blue-500 rounded px-2 py-1 w-full"
+												autofocus
+											/>
+										{:else}
+											<h4
+												class="text-lg font-semibold text-gray-800 cursor-pointer hover:text-blue-600 leading-tight"
+												onclick={() => startEditingReceipt(receipt.id, 'name')}
+												title="Click to edit name"
+											>
+												{receipt.name}
+											</h4>
+										{/if}
+
+										<!-- Receipt Date (Editable) -->
+										{#if editingReceipt && editingReceipt.receiptId === receipt.id && editingReceipt.field === 'date'}
+											<input
+												type="date"
+												bind:value={editingReceiptValue}
+												onblur={saveReceiptEdit}
+												onkeydown={(e) => {
+													if (e.key === 'Enter') saveReceiptEdit();
+													if (e.key === 'Escape') cancelReceiptEdit();
+												}}
+												class="text-sm text-gray-500 border border-blue-500 rounded px-2 py-1 w-fit"
+												autofocus
+											/>
+										{:else}
+											<p
+												class="text-sm text-gray-500 cursor-pointer hover:text-blue-600 leading-tight"
+												onclick={() => startEditingReceipt(receipt.id, 'date')}
+												title="Click to edit date"
+											>
+												{new Date(receipt.created_at).toLocaleDateString()}
+											</p>
+										{/if}
 									</div>
 									<div class="flex items-center gap-2">
 										<button
@@ -819,9 +906,10 @@
 		</div>
 	{/if}
 
-	<NewReceiptModal 
-		bind:show={showNewReceiptForm} 
-		{group} 
+	<NewReceiptModal
+		bind:show={showNewReceiptForm}
+		{group}
 		onSubmit={handleCreateReceipt}
+		onScanSuccess={refreshGroup}
 	/>
 </main>

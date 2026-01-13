@@ -60,7 +60,7 @@ class Group(Base):
     receipts: Mapped[list["Receipt"]] = relationship(
         back_populates="group",
         cascade="all, delete-orphan",
-        order_by="Receipt.id",
+        order_by="Receipt.created_at",
     )
 
 

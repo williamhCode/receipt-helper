@@ -1,16 +1,19 @@
 from typing import Annotated
 import os
 import logging
+import json
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import selectinload
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 
 from src import models, schemas, crud
 from src.models import Base
+from src import gemini_scanner
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -20,7 +23,8 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Receipt Helper", version="0.1.0")
 
 # CORS
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+origins = "http://localhost:5173,http://localhost:5174,http://localhost:5175"
+allowed_origins = os.getenv("ALLOWED_ORIGINS", origins).split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -260,6 +264,155 @@ async def create_receipt(group_id: int, receipt_data: schemas.ReceiptCreate, db:
     return db_receipt
 
 
+@app.post("/groups/{group_id}/receipts/scan", response_model=schemas.Receipt)
+async def scan_and_create_receipt(
+    group_id: int,
+    db: SessionDep,
+    file: UploadFile = File(...),
+    people: str = ""  # Comma-separated list of people names
+):
+    """
+    Scans a receipt image or PDF with Gemini AI and automatically creates a receipt.
+
+    - Accepts image file upload (JPEG, PNG, WebP) or PDF
+    - Extracts merchant name, date, and line items using AI
+    - Creates receipt automatically (no preview)
+    - Files are NOT stored - processed and discarded immediately
+
+    Returns the created receipt on success.
+    """
+    # Validate group exists
+    group = await db.get(models.Group, group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    # Validate file type
+    allowed_types = ["image/jpeg", "image/png", "image/webp", "application/pdf"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {file.content_type}. Please upload JPEG, PNG, WebP images, or PDF files."
+        )
+
+    # Read file and validate size
+    MAX_SIZE = 10 * 1024 * 1024  # 10MB
+    image_bytes = await file.read()
+
+    if len(image_bytes) > MAX_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail="File too large. Maximum size is 10MB."
+        )
+
+    if len(image_bytes) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Empty file uploaded"
+        )
+
+    logger.info(f"Scanning receipt image: {file.filename}, {len(image_bytes)} bytes, {file.content_type}")
+
+    try:
+        # Scan receipt with Gemini AI
+        receipt_data = await gemini_scanner.scan_receipt_image(image_bytes, file.content_type)
+
+        # Validate extracted data
+        is_valid, error_msg = gemini_scanner.validate_receipt_data(receipt_data)
+        if not is_valid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Could not extract valid receipt data: {error_msg}"
+            )
+
+        # Generate receipt name
+        receipt_name = gemini_scanner.generate_receipt_name(
+            receipt_data["merchant_name"],
+            receipt_data.get("receipt_date")
+        )
+
+        # Use receipt date or today's date
+        receipt_date = receipt_data.get("receipt_date")
+        if not receipt_date:
+            receipt_date = date.today().isoformat()
+            logger.info(f"No date found in receipt, using today's date: {receipt_date}")
+
+        # Store extracted data in raw_data as JSON (includes date for reference)
+        raw_data_json = json.dumps({
+            "merchant_name": receipt_data["merchant_name"],
+            "receipt_date": receipt_date,
+            "scanned_at": date.today().isoformat(),
+            "confidence": receipt_data.get("confidence", "unknown")
+        })
+
+        # Transform Gemini data to ReceiptCreate schema
+        entries_data = [
+            schemas.ReceiptEntryCreate(
+                name=item["name"],
+                price=float(item["price"]),
+                taxable=bool(item.get("taxable", True)),
+                assigned_to=[]  # Empty initially, user can assign later
+            )
+            for item in receipt_data["items"]
+        ]
+
+        # Parse people names from comma-separated string
+        people_names = [name.strip() for name in people.split(",") if name.strip()] if people else []
+
+        # Create receipt using existing CRUD functions
+        db_receipt = await crud.create_receipt(
+            db=db,
+            group_id=group_id,
+            name=receipt_name,
+            paid_by_name=None,  # User can set later
+            people_names=people_names,  # Use provided people or empty list
+            processed=False,
+            raw_data=raw_data_json,  # Store extracted metadata including date
+            created_at=receipt_date  # Use the extracted or defaulted receipt date
+        )
+
+        # Create entries
+        for entry_data in entries_data:
+            await crud.create_receipt_entry(
+                db=db,
+                receipt=db_receipt,
+                name=entry_data.name,
+                price=entry_data.price,
+                taxable=entry_data.taxable,
+                assigned_to_names=entry_data.assigned_to
+            )
+
+        await db.commit()
+
+        # Reload receipt with all relationships
+        stmt = select(models.Receipt).where(models.Receipt.id == db_receipt.id).options(
+            selectinload(models.Receipt.entries)
+        )
+        db_receipt = (await db.scalars(stmt)).first()
+
+        logger.info(f"Successfully created receipt from scan: {receipt_name} with {len(entries_data)} items")
+
+        return db_receipt
+
+    except ValueError as e:
+        # Image validation errors
+        logger.error(f"Image validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        # Gemini API errors
+        logger.error(f"Gemini API error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Receipt scanning service unavailable: {str(e)}"
+        )
+    except Exception as e:
+        # Unexpected errors
+        logger.error(f"Unexpected error during receipt scanning: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="An unexpected error occurred during receipt scanning"
+        )
+
+
 @app.get("/receipts/{receipt_id}", response_model=schemas.Receipt)
 async def get_receipt(receipt_id: int, db: SessionDep):
     stmt = select(models.Receipt).where(models.Receipt.id == receipt_id).options(
@@ -323,6 +476,14 @@ async def update_receipt(
             receipt.paid_by_id = paid_by.id
         else:
             receipt.paid_by_id = None
+
+    # Update created_at (receipt date)
+    if receipt_update.created_at is not None:
+        from datetime import datetime
+        try:
+            receipt.created_at = datetime.fromisoformat(receipt_update.created_at)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
 
     await db.commit()
 

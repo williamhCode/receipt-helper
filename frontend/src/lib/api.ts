@@ -101,11 +101,12 @@ export function getReceipt(receiptId: number) {
   return get<Receipt>(`/receipts/${receiptId}`);
 }
 
-export function updateReceipt(receiptId: number, receiptData: { 
+export function updateReceipt(receiptId: number, receiptData: {
 	name?: string;
-	people?: string[]; 
+	people?: string[];
 	processed?: boolean;
 	paid_by?: string | null;
+	created_at?: string;  // ISO format date string (YYYY-MM-DD)
 }) {
 	return patch<Receipt>(`/receipts/${receiptId}`, receiptData);
 }
@@ -116,6 +117,64 @@ export function updateReceiptPaidBy(receiptId: number, paidBy: string | null) {
 
 export function deleteReceipt(receiptId: number) {
 	return del(`/receipts/${receiptId}`);
+}
+
+/**
+ * Scans a receipt image using Gemini AI and creates a receipt.
+ *
+ * @param groupId - The group ID to create the receipt in
+ * @param file - The image file to scan
+ * @param people - Optional array of people names for the receipt
+ * @returns Promise<Receipt> - The created receipt
+ * @throws Error if scanning fails or image is invalid
+ */
+export async function scanReceipt(groupId: number, file: File, people?: string[]): Promise<Receipt> {
+	const formData = new FormData();
+	formData.append('file', file);
+
+	// Add people names as comma-separated string if provided
+	if (people && people.length > 0) {
+		formData.append('people', people.join(','));
+	}
+
+	const response = await fetch(`${API_BASE}/groups/${groupId}/receipts/scan`, {
+		method: 'POST',
+		body: formData  // No Content-Type header - browser sets multipart boundary
+	});
+
+	if (!response.ok) {
+		const errorText = await response.text().catch(() => 'Unknown error');
+		throw new Error(`Scan failed: ${errorText}`);
+	}
+
+	return await response.json() as Receipt;
+}
+
+/**
+ * Scans multiple receipt images sequentially with progress tracking.
+ *
+ * @param groupId - The group ID to create receipts in
+ * @param files - Array of image files to scan
+ * @param onProgress - Optional callback for progress updates (current, total)
+ * @param people - Optional array of people names for the receipts
+ * @returns Promise<Receipt[]> - Array of created receipts
+ */
+export async function scanMultipleReceipts(
+	groupId: number,
+	files: File[],
+	onProgress?: (current: number, total: number) => void,
+	people?: string[]
+): Promise<Receipt[]> {
+	const receipts: Receipt[] = [];
+
+	for (let i = 0; i < files.length; i++) {
+		onProgress?.(i, files.length);
+		const receipt = await scanReceipt(groupId, files[i], people);
+		receipts.push(receipt);
+	}
+
+	onProgress?.(files.length, files.length);
+	return receipts;
 }
 
 // ============================================================================
