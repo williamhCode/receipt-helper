@@ -31,9 +31,9 @@ else:
 MODEL_NAME = "models/gemini-2.5-flash"  # Latest stable multimodal model
 
 
-EXTRACTION_PROMPT = """You are a receipt OCR specialist. Extract structured data from this receipt image.
+EXTRACTION_PROMPT = """Extract data from this receipt image.
 
-Return ONLY valid JSON with this exact structure (no markdown, no explanations):
+Return ONLY valid JSON with this exact structure:
 {
   "merchant_name": "store or restaurant name",
   "receipt_date": "YYYY-MM-DD format or null if not found",
@@ -43,10 +43,10 @@ Return ONLY valid JSON with this exact structure (no markdown, no explanations):
   "confidence": "high"
 }
 
-Instructions:
-- Extract ALL line items from the receipt
-- Set taxable individually based on if the item should be taxed
-- Use null for receipt_date if the date is unclear or not visible
+Notes:
+- Don't include items if they're unavaliable
+- Include extra charges like driver tip
+- Set taxable to the best of your ability (food items are usually not taxed)
 - Set confidence to "low" if: this is not a receipt, the image is too blurry to read, or critical data is missing
 
 Return the JSON now:"""
