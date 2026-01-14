@@ -46,7 +46,7 @@ Return ONLY valid JSON with this exact structure:
 Notes:
 - Don't include items if they're unavaliable
 - Include extra charges like driver tip
-- Set taxable to the best of your ability (food items are usually not taxed)
+- Set taxable to the best of your ability (usually non-food goods are taxed)
 - Set confidence to "low" if: this is not a receipt, the image is too blurry to read, or critical data is missing
 
 Return the JSON now:"""
