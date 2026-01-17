@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import selectinload
 
-from fastapi import Depends, FastAPI, HTTPException, status, UploadFile, File
+from fastapi import Depends, FastAPI, HTTPException, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 
 from src import models, schemas, crud
@@ -269,7 +269,7 @@ async def scan_and_create_receipt(
     group_id: int,
     db: SessionDep,
     file: UploadFile = File(...),
-    people: str = ""  # Comma-separated list of people names
+    people: str = Form("")  # Comma-separated list of people names
 ):
     """
     Scans a receipt image or PDF with Gemini AI and automatically creates a receipt.
